@@ -1,0 +1,20 @@
+config HAVE_ARCH_KHP
+  bool
+
+if HAVE_ARCH_KHP
+
+config KHP
+  bool "KHP: kernel heap protector"
+  depends on SLUB && !KASAN
+  help
+    Enables kernel heap protector - runtime memory protection, designed to
+    prevent exploitation of use-after-free issues and some cases of heap
+    overflows. This feature causes about a ~XX% performance slowdown.
+
+config KHP_DEBUG
+  bool "KHP: enable slow debug features"
+  depends on KHP
+  help
+    Enable slow debugging code for the Kernel Heap Protector.
+
+endif

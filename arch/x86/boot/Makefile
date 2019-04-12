@@ -10,6 +10,7 @@
 #
 
 KASAN_SANITIZE			:= n
+KHP_INSTRUMENT			:= n
 OBJECT_FILES_NON_STANDARD	:= y
 
 # Kernel does not boot with kcov instrumentation here.

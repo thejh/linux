@@ -12,6 +12,7 @@ include $(srctree)/lib/vdso/Makefile
 KBUILD_CFLAGS += $(DISABLE_LTO)
 KASAN_SANITIZE			:= n
 UBSAN_SANITIZE			:= n
+KHP_INSTRUMENT			:= n
 OBJECT_FILES_NON_STANDARD	:= y
 
 # Prevents link failures: __sanitizer_cov_trace_pc() is not linked in.
@@ -30,6 +31,7 @@ obj-y				+= vma.o
 KASAN_SANITIZE_vma.o		:= y
 UBSAN_SANITIZE_vma.o		:= y
 KCSAN_SANITIZE_vma.o		:= y
+KHP_INSTRUMENT_vma.o		:= y
 OBJECT_FILES_NON_STANDARD_vma.o	:= n
 
 # vDSO images to build

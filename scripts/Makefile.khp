@@ -1,0 +1,12 @@
+ifdef CONFIG_KHP
+
+CFLAGS_KHP := -fsanitize=kernel -D__KHP_INSTRUMENT__
+
+ifeq ($(call cc-option, $(CFLAGS_KHP) -Werror),)
+   ifneq ($(CONFIG_COMPILE_TEST),y)
+        $(warning Cannot use CONFIG_KHP: \
+            -fsanitize=kernel is not supported by compiler)
+   endif
+endif
+
+endif

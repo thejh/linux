@@ -510,6 +510,7 @@ static const char *uaccess_safe_builtin[] = {
 	"__memcpy_mcsafe",
 	"mcsafe_handle_tail",
 	"ftrace_likely_update", /* CONFIG_TRACE_BRANCH_PROFILING */
+	"__khp_decode_ptr",
 	NULL
 };
 
