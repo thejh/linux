@@ -31,65 +31,42 @@
  * as they get called from within inline assembly.
  */
 
-#define ENTER	mov PER_CPU_VAR(current_task), %_ASM_BX
-
 .text
-SYM_FUNC_START(__put_user_1)
-	ENTER
+
+.macro generate_put_user_fn name:req, size:req, source_reg:req
+SYM_FUNC_START(\name)
+	mov PER_CPU_VAR(current_task), %_ASM_BX
+
+	.if \size == 1
 	cmp TASK_addr_limit(%_ASM_BX),%_ASM_CX
 	jae .Lbad_put_user
+	.else
+	mov TASK_addr_limit(%_ASM_BX),%_ASM_BX
+	sub $(\size - 1),%_ASM_BX
+	cmp %_ASM_BX,%_ASM_CX
+	jae .Lbad_put_user
+	.endif
+
 	ASM_STAC
-1:	movb %al,(%_ASM_CX)
+
+1:	mov \source_reg, (%_ASM_CX)
+	_ASM_EXTABLE_UA(1b, .Lbad_put_user_clac)
+	.if \size == 8 && IS_ENABLED(CONFIG_X86_32)
+2:	movl %edx,4(%_ASM_CX)
+	_ASM_EXTABLE_UA(2b, .Lbad_put_user_clac)
+	.endif
+
 	xor %eax,%eax
 	ASM_CLAC
 	ret
-SYM_FUNC_END(__put_user_1)
-EXPORT_SYMBOL(__put_user_1)
+SYM_FUNC_END(\name)
+EXPORT_SYMBOL(\name)
+.endm
 
-SYM_FUNC_START(__put_user_2)
-	ENTER
-	mov TASK_addr_limit(%_ASM_BX),%_ASM_BX
-	sub $1,%_ASM_BX
-	cmp %_ASM_BX,%_ASM_CX
-	jae .Lbad_put_user
-	ASM_STAC
-2:	movw %ax,(%_ASM_CX)
-	xor %eax,%eax
-	ASM_CLAC
-	ret
-SYM_FUNC_END(__put_user_2)
-EXPORT_SYMBOL(__put_user_2)
-
-SYM_FUNC_START(__put_user_4)
-	ENTER
-	mov TASK_addr_limit(%_ASM_BX),%_ASM_BX
-	sub $3,%_ASM_BX
-	cmp %_ASM_BX,%_ASM_CX
-	jae .Lbad_put_user
-	ASM_STAC
-3:	movl %eax,(%_ASM_CX)
-	xor %eax,%eax
-	ASM_CLAC
-	ret
-SYM_FUNC_END(__put_user_4)
-EXPORT_SYMBOL(__put_user_4)
-
-SYM_FUNC_START(__put_user_8)
-	ENTER
-	mov TASK_addr_limit(%_ASM_BX),%_ASM_BX
-	sub $7,%_ASM_BX
-	cmp %_ASM_BX,%_ASM_CX
-	jae .Lbad_put_user
-	ASM_STAC
-4:	mov %_ASM_AX,(%_ASM_CX)
-#ifdef CONFIG_X86_32
-5:	movl %edx,4(%_ASM_CX)
-#endif
-	xor %eax,%eax
-	ASM_CLAC
-	RET
-SYM_FUNC_END(__put_user_8)
-EXPORT_SYMBOL(__put_user_8)
+generate_put_user_fn __put_user_1, 1, %al
+generate_put_user_fn __put_user_2, 2, %ax
+generate_put_user_fn __put_user_4, 4, %eax
+generate_put_user_fn __put_user_8, 8, %_ASM_AX
 
 SYM_CODE_START_LOCAL(.Lbad_put_user_clac)
 	ASM_CLAC
@@ -97,11 +74,3 @@ SYM_CODE_START_LOCAL(.Lbad_put_user_clac)
 	movl $-EFAULT,%eax
 	RET
 SYM_CODE_END(.Lbad_put_user_clac)
-
-	_ASM_EXTABLE_UA(1b, .Lbad_put_user_clac)
-	_ASM_EXTABLE_UA(2b, .Lbad_put_user_clac)
-	_ASM_EXTABLE_UA(3b, .Lbad_put_user_clac)
-	_ASM_EXTABLE_UA(4b, .Lbad_put_user_clac)
-#ifdef CONFIG_X86_32
-	_ASM_EXTABLE_UA(5b, .Lbad_put_user_clac)
-#endif
