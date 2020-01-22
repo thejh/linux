@@ -16,6 +16,7 @@
 #include <linux/blk-mq-virtio.h>
 #include <linux/numa.h>
 #include <uapi/linux/virtio_ring.h>
+#include <linux/khp.h>
 
 #define PART_BITS 4
 #define VQ_NAME_LEN 16
@@ -136,6 +137,7 @@ static int virtblk_setup_discard_write_zeroes(struct request *req, bool unmap)
 		n++;
 	}
 
+	range = khp_unsafe_decode(range);
 	req->special_vec.bv_page = virt_to_page(range);
 	req->special_vec.bv_offset = offset_in_page(range);
 	req->special_vec.bv_len = sizeof(*range) * segments;
@@ -149,8 +151,11 @@ static inline void virtblk_request_done(struct request *req)
 	struct virtblk_req *vbr = blk_mq_rq_to_pdu(req);
 
 	if (req->rq_flags & RQF_SPECIAL_PAYLOAD) {
-		kfree(page_address(req->special_vec.bv_page) +
-		      req->special_vec.bv_offset);
+		void *ptr = page_address(req->special_vec.bv_page) +
+			    req->special_vec.bv_offset;
+
+		ptr = khp_unsafe_rewrap(ptr);
+		kfree(ptr);
 	}
 
 	blk_mq_end_request(req, virtblk_result(vbr));
