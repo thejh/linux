@@ -581,6 +581,9 @@ static bool khp_set_pte(void *addr, struct page *page)
 		struct khp_meta *m = &linear_meta_page[i];
 		m->khp_extag = KHP_ETT_QUEUED | KHP_EXTAG_RELEASED;
 		m->khp_cookie = khp_depletion_cookie(&meta_page[i]) + 1;
+#ifdef CONFIG_KHP_DEBUG_DEPLETE_FASTER
+		m->khp_cookie += 0xff00;
+#endif
 		m->fb_idx = KHP_LIST_END;
 	}
 

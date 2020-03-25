@@ -20,4 +20,14 @@ config KHP_DEBUG
   help
     Enable slow debugging code for the Kernel Heap Protector.
 
+config KHP_DEBUG_DEPLETE_FASTER
+  bool "KHP: Artificially exhaust cookie space faster for internal debugging"
+  depends on KHP
+  help
+    This reduces the cookie space per allocation from 0x10000 to 0x100 to aid in
+    debugging problems in KHP's fallback logic for exhausted allocations.
+
+    Do not enable this unless you know what you're doing - this will reduce
+    performance and cause your system to run out of memory fairly quickly.
+
 endif
