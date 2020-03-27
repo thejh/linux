@@ -3807,6 +3807,32 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 	return !!oo_objects(s->oo);
 }
 
+#ifdef CONFIG_KHP_DEBUG
+static unsigned long khp_first = 0, khp_last = ULONG_MAX;
+static int __init khp_setup(char *str)
+{
+	if (str) {
+		char buf[100];
+		char *delim;
+
+		strlcpy(buf, str, sizeof(buf));
+		delim = strchr(buf, '-');
+		if (!delim)
+			return -EINVAL;
+		*delim = 0;
+		if (kstrtoul(buf, 10, &khp_first) ||
+		    kstrtoul(delim+1, 10, &khp_last)) {
+			khp_first = 0;
+			khp_last = ULONG_MAX;
+			return -EINVAL;
+		}
+	}
+
+	return -EINVAL;
+}
+early_param("khprange", khp_setup);
+#endif
+
 static int kmem_cache_open(struct kmem_cache *s, slab_flags_t flags)
 {
 	s->flags = kmem_cache_flags(s->size, flags, s->name, s->ctor);
@@ -3815,8 +3841,21 @@ static int kmem_cache_open(struct kmem_cache *s, slab_flags_t flags)
 #endif
 
 #ifdef CONFIG_KHP
-	if (!(flags & (SLAB_NOKHP|SLAB_TYPESAFE_BY_RCU)) && s->ctor == NULL)
+	if (!(flags & (SLAB_NOKHP|SLAB_TYPESAFE_BY_RCU)) && s->ctor == NULL) {
+#ifdef CONFIG_KHP_DEBUG
+		static int khp_idx;
+
+		khp_idx++;
+		if (khp_idx >= khp_first && khp_idx <= khp_last) {
+			pr_warn("KHP: SLAB %d ENABLED '%s'\n", khp_idx, s->name);
+			s->flags |= SLAB_KHP;
+		} else {
+			pr_warn("KHP: SLAB %d DISABLED '%s'\n", khp_idx, s->name);
+		}
+#else
 		s->flags |= SLAB_KHP;
+#endif
+	}
 
 	spin_lock_init(&s->khp_detached_head_lock);
 	s->khp_detached_head = KHP_LIST_END;
