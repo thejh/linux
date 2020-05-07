@@ -8,7 +8,7 @@
  * and restored. So an optimized version of __pv_queued_spin_unlock() is
  * hand-coded for 64-bit, but it isn't worthwhile to do it for 32-bit.
  */
-#ifdef CONFIG_64BIT
+#if defined(CONFIG_64BIT) && !defined(CONFIG_KHP)
 
 PV_CALLEE_SAVE_REGS_THUNK(__pv_queued_spin_unlock_slowpath);
 #define __pv_queued_spin_unlock	__pv_queued_spin_unlock
@@ -60,10 +60,10 @@ asm    (".pushsection .text;"
 	".size " PV_UNLOCK ", .-" PV_UNLOCK ";"
 	".popsection");
 
-#else /* CONFIG_64BIT */
+#else /* defined(CONFIG_64BIT) && !defined(CONFIG_KHP) */
 
 extern void __pv_queued_spin_unlock(struct qspinlock *lock);
 PV_CALLEE_SAVE_REGS_THUNK(__pv_queued_spin_unlock);
 
-#endif /* CONFIG_64BIT */
+#endif /* defined(CONFIG_64BIT) && !defined(CONFIG_KHP) */
 #endif

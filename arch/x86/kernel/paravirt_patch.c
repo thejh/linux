@@ -108,10 +108,12 @@ unsigned int native_patch(u8 type, void *insn_buff, unsigned long addr,
 #endif
 
 #ifdef CONFIG_PARAVIRT_SPINLOCKS
+#ifndef CONFIG_KHP
 	case PARAVIRT_PATCH(lock.queued_spin_unlock):
 		if (pv_is_native_spin_unlock())
 			return PATCH(lock, queued_spin_unlock, insn_buff, len);
 		break;
+#endif
 
 	case PARAVIRT_PATCH(lock.vcpu_is_preempted):
 		if (pv_is_native_vcpu_is_preempted())
