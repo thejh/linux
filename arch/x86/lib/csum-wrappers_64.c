@@ -7,6 +7,7 @@
 #include <asm/checksum.h>
 #include <linux/export.h>
 #include <linux/uaccess.h>
+#include <linux/in6.h>
 #include <asm/smap.h>
 
 /**
@@ -29,6 +30,8 @@ csum_partial_copy_from_user(const void __user *src, void *dst,
 
 	if (!likely(access_ok(src, len)))
 		goto out_err;
+	src = khp_unsafe_decode(src);
+	dst = khp_unsafe_decode(dst);
 
 	/*
 	 * Why 6, not 7? To handle odd addresses aligned we
@@ -93,6 +96,8 @@ csum_partial_copy_to_user(const void *src, void __user *dst,
 		*errp = -EFAULT;
 		return 0;
 	}
+	src = khp_unsafe_decode(src);
+	dst = khp_unsafe_decode(dst);
 
 	if (unlikely((unsigned long)dst & 6)) {
 		while (((unsigned long)dst & 6) && len >= 2) {
@@ -130,6 +135,8 @@ EXPORT_SYMBOL(csum_partial_copy_to_user);
 __wsum
 csum_partial_copy_nocheck(const void *src, void *dst, int len, __wsum sum)
 {
+	src = khp_unsafe_decode(src);
+	dst = khp_unsafe_decode(dst);
 	return csum_partial_copy_generic(src, dst, len, sum, NULL, NULL);
 }
 EXPORT_SYMBOL(csum_partial_copy_nocheck);
@@ -150,7 +157,8 @@ __sum16 csum_ipv6_magic(const struct in6_addr *saddr,
 	    "	adcq $0,%[sum]\n"
 
 	    : [sum] "=r" (sum64)
-	    : "[sum]" (rest), [saddr] "r" (saddr), [daddr] "r" (daddr));
+	    : "[sum]" (rest), [saddr] "r" (khp_unsafe_decode(saddr)),
+	      [daddr] "r" (khp_unsafe_decode(daddr)));
 
 	return csum_fold(
 	       (__force __wsum)add32_with_carry(sum64 & 0xffffffff, sum64>>32));

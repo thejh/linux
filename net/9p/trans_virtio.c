@@ -170,6 +170,8 @@ static int pack_sg_list(struct scatterlist *sg, int start,
 	int s;
 	int index = start;
 
+	data = khp_unsafe_decode(data);
+
 	while (count) {
 		s = rest_of_page(data);
 		if (s > count)
@@ -343,7 +345,7 @@ static int p9_get_mapped_pages(struct virtio_chan *chan,
 		while (1) {
 			len = iov_iter_single_seg_count(data);
 			if (likely(len)) {
-				p = data->kvec->iov_base + data->iov_offset;
+				p = khp_unsafe_decode(data->kvec->iov_base + data->iov_offset);
 				break;
 			}
 			iov_iter_advance(data, 0);

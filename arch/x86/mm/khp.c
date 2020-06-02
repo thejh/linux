@@ -144,3 +144,9 @@ void khp_non_canonical_hook(unsigned long addr)
 	pr_emerg(" pointer=0x%016lx\n", addr);
 	pr_emerg("expected=0x%016lx\n", expected);
 }
+
+void khp_non_canonical_bug(void *ptr)
+{
+	khp_non_canonical_hook((unsigned long)ptr);
+	BUG();
+}

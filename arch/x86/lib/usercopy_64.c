@@ -41,7 +41,7 @@ unsigned long __clear_user(void __user *addr, unsigned long size)
 		_ASM_EXTABLE_UA(0b, 3b)
 		_ASM_EXTABLE_UA(1b, 2b)
 		: [size8] "=&c"(size), [dst] "=&D" (__d0)
-		: [size1] "r"(size & 7), "[size8]" (size / 8), "[dst]"(addr));
+		: [size1] "r"(size & 7), "[size8]" (size / 8), "[dst]"(khp_unsafe_decode(addr)));
 	clac();
 	return size;
 }

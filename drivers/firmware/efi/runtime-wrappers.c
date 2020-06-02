@@ -32,6 +32,7 @@
 #include <linux/stringify.h>
 #include <linux/workqueue.h>
 #include <linux/completion.h>
+#include <asm-generic/khp.h>
 
 #include <asm/efi.h>
 
@@ -188,53 +189,66 @@ static void efi_call_rts(struct work_struct *work)
 
 	switch (efi_rts_work.efi_rts_id) {
 	case EFI_GET_TIME:
-		status = efi_call_virt(get_time, (efi_time_t *)arg1,
-				       (efi_time_cap_t *)arg2);
+		status = efi_call_virt(get_time,
+				       khp_unsafe_decode((efi_time_t *)arg1),
+				       khp_unsafe_decode((efi_time_cap_t *)arg2));
 		break;
 	case EFI_SET_TIME:
 		status = efi_call_virt(set_time, (efi_time_t *)arg1);
 		break;
 	case EFI_GET_WAKEUP_TIME:
-		status = efi_call_virt(get_wakeup_time, (efi_bool_t *)arg1,
-				       (efi_bool_t *)arg2, (efi_time_t *)arg3);
+		status = efi_call_virt(get_wakeup_time,
+				       khp_unsafe_decode((efi_bool_t *)arg1),
+				       khp_unsafe_decode((efi_bool_t *)arg2),
+				       khp_unsafe_decode((efi_time_t *)arg3));
 		break;
 	case EFI_SET_WAKEUP_TIME:
 		status = efi_call_virt(set_wakeup_time, *(efi_bool_t *)arg1,
-				       (efi_time_t *)arg2);
+				       khp_unsafe_decode((efi_time_t *)arg2));
 		break;
 	case EFI_GET_VARIABLE:
-		status = efi_call_virt(get_variable, (efi_char16_t *)arg1,
-				       (efi_guid_t *)arg2, (u32 *)arg3,
-				       (unsigned long *)arg4, (void *)arg5);
+		status = efi_call_virt(get_variable,
+				       khp_unsafe_decode((efi_char16_t *)arg1),
+				       khp_unsafe_decode((efi_guid_t *)arg2),
+				       khp_unsafe_decode((u32 *)arg3),
+				       khp_unsafe_decode((unsigned long *)arg4),
+				       khp_unsafe_decode((void *)arg5));
 		break;
 	case EFI_GET_NEXT_VARIABLE:
-		status = efi_call_virt(get_next_variable, (unsigned long *)arg1,
-				       (efi_char16_t *)arg2,
-				       (efi_guid_t *)arg3);
+		status = efi_call_virt(get_next_variable,
+				       khp_unsafe_decode((unsigned long *)arg1),
+				       khp_unsafe_decode((efi_char16_t *)arg2),
+				       khp_unsafe_decode((efi_guid_t *)arg3));
 		break;
 	case EFI_SET_VARIABLE:
-		status = efi_call_virt(set_variable, (efi_char16_t *)arg1,
-				       (efi_guid_t *)arg2, *(u32 *)arg3,
-				       *(unsigned long *)arg4, (void *)arg5);
+		status = efi_call_virt(set_variable,
+				       khp_unsafe_decode((efi_char16_t *)arg1),
+				       khp_unsafe_decode((efi_guid_t *)arg2),
+				       *(u32 *)arg3, *(unsigned long *)arg4,
+				       khp_unsafe_decode((void *)arg5));
 		break;
 	case EFI_QUERY_VARIABLE_INFO:
 		status = efi_call_virt(query_variable_info, *(u32 *)arg1,
-				       (u64 *)arg2, (u64 *)arg3, (u64 *)arg4);
+				       khp_unsafe_decode((u64 *)arg2),
+				       khp_unsafe_decode((u64 *)arg3),
+				       khp_unsafe_decode((u64 *)arg4));
 		break;
 	case EFI_GET_NEXT_HIGH_MONO_COUNT:
-		status = efi_call_virt(get_next_high_mono_count, (u32 *)arg1);
+		status = efi_call_virt(get_next_high_mono_count,
+				       khp_unsafe_decode((u32 *)arg1));
 		break;
 	case EFI_UPDATE_CAPSULE:
 		status = efi_call_virt(update_capsule,
-				       (efi_capsule_header_t **)arg1,
+				       khp_unsafe_decode((efi_capsule_header_t **)arg1),
 				       *(unsigned long *)arg2,
 				       *(unsigned long *)arg3);
 		break;
 	case EFI_QUERY_CAPSULE_CAPS:
 		status = efi_call_virt(query_capsule_caps,
-				       (efi_capsule_header_t **)arg1,
-				       *(unsigned long *)arg2, (u64 *)arg3,
-				       (int *)arg4);
+				       khp_unsafe_decode((efi_capsule_header_t **)arg1),
+				       *(unsigned long *)arg2,
+				       khp_unsafe_decode((u64 *)arg3),
+				       khp_unsafe_decode((int *)arg4));
 		break;
 	default:
 		/*
@@ -352,8 +366,9 @@ virt_efi_set_variable_nonblocking(efi_char16_t *name, efi_guid_t *vendor,
 	if (down_trylock(&efi_runtime_lock))
 		return EFI_NOT_READY;
 
-	status = efi_call_virt(set_variable, name, vendor, attr, data_size,
-			       data);
+	status = efi_call_virt(set_variable, khp_unsafe_decode(name),
+			       khp_unsafe_decode(vendor), attr, data_size,
+			       khp_unsafe_decode(data));
 	up(&efi_runtime_lock);
 	return status;
 }
@@ -391,8 +406,10 @@ virt_efi_query_variable_info_nonblocking(u32 attr,
 	if (down_trylock(&efi_runtime_lock))
 		return EFI_NOT_READY;
 
-	status = efi_call_virt(query_variable_info, attr, storage_space,
-			       remaining_space, max_variable_size);
+	status = efi_call_virt(query_variable_info, attr,
+			       khp_unsafe_decode(storage_space),
+			       khp_unsafe_decode(remaining_space),
+			       khp_unsafe_decode(max_variable_size));
 	up(&efi_runtime_lock);
 	return status;
 }
@@ -420,7 +437,8 @@ static void virt_efi_reset_system(int reset_type,
 		return;
 	}
 	efi_rts_work.efi_rts_id = EFI_RESET_SYSTEM;
-	__efi_call_virt(reset_system, reset_type, status, data_size, data);
+	__efi_call_virt(reset_system, reset_type, status, data_size,
+			khp_unsafe_decode(data));
 	up(&efi_runtime_lock);
 }
 

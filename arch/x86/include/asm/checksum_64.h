@@ -47,6 +47,7 @@ static inline __sum16 ip_fast_csum(const void *iph, unsigned int ihl)
 {
 	unsigned int sum;
 
+	iph = khp_unsafe_decode(iph);
 	asm("  movl (%1), %0\n"
 	    "  subl $4, %2\n"
 	    "  jbe 2f\n"

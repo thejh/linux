@@ -71,7 +71,7 @@ static inline void copy_user_page(void *to, void *from, unsigned long vaddr,
 	void *kaddr_ = (void*)(kaddr);					\
 	if (is_khp_tagged_ptr((unsigned long)kaddr_)) {			\
 		/*WARN(1, "virt_to_page(0x%lx)", (unsigned long)kaddr_);*/ \
-		kaddr_ = khp_unsafe_decode(kaddr_);			\
+		kaddr_ = khp_unsafe_decode_noderef(kaddr_);		\
 	}								\
 	pfn_to_page(__pa(kaddr_) >> PAGE_SHIFT);			\
 })

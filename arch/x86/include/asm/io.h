@@ -40,6 +40,8 @@
 
 #include <linux/string.h>
 #include <linux/compiler.h>
+#include <linux/bug.h>
+#include <asm-generic/khp.h>
 #include <asm/page.h>
 #include <asm/early_ioremap.h>
 #include <asm/pgtable_types.h>
@@ -128,6 +130,10 @@ extern int valid_mmap_phys_addr_range(unsigned long pfn, size_t size);
 
 static inline phys_addr_t virt_to_phys(volatile void *address)
 {
+	if (is_khp_tagged_ptr((unsigned long)address)) {
+		//WARN(1, "virt_to_phys() on KHP pointer");
+		address = khp_unsafe_decode_noderef(address);
+	}
 	return __pa(address);
 }
 #define virt_to_phys virt_to_phys
@@ -147,7 +153,10 @@ static inline phys_addr_t virt_to_phys(volatile void *address)
 
 static inline void *phys_to_virt(phys_addr_t address)
 {
-	return __va(address);
+	void *res = __va(address);
+
+	//WARN_ON(is_khp_tagged_ptr((unsigned long)res));
+	return res;
 }
 #define phys_to_virt phys_to_virt
 
@@ -309,6 +318,7 @@ static inline void outs##bwl(int port, const void *addr, unsigned long count) \
 			count--;					\
 		}							\
 	} else {							\
+		addr = khp_unsafe_decode(addr);				\
 		asm volatile("rep; outs" #bwl				\
 			     : "+S"(addr), "+c"(count)			\
 			     : "d"(port) : "memory");			\
@@ -325,6 +335,7 @@ static inline void ins##bwl(int port, void *addr, unsigned long count)	\
 			count--;					\
 		}							\
 	} else {							\
+		addr = khp_unsafe_decode(addr);				\
 		asm volatile("rep; ins" #bwl				\
 			     : "+D"(addr), "+c"(count)			\
 			     : "d"(port) : "memory");			\

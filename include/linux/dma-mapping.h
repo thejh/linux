@@ -11,6 +11,7 @@
 #include <linux/scatterlist.h>
 #include <linux/bug.h>
 #include <linux/mem_encrypt.h>
+#include <asm-generic/khp.h>
 
 /**
  * List of possible attributes associated with a DMA mapping. The semantics
@@ -585,6 +586,10 @@ static inline dma_addr_t dma_map_single_attrs(struct device *dev, void *ptr,
 			  "rejecting DMA map of vmalloc memory\n"))
 		return DMA_MAPPING_ERROR;
 	debug_dma_map_single(dev, ptr, size);
+	if (is_khp_tagged_ptr((unsigned long)ptr)) {
+		//WARN(1, "dma_map_single_attrs() on KHP pointer");
+		ptr = khp_unsafe_decode(ptr);
+	}
 	return dma_map_page_attrs(dev, virt_to_page(ptr), offset_in_page(ptr),
 			size, dir, attrs);
 }

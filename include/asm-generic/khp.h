@@ -149,8 +149,24 @@ static inline bool is_khp_tagged_ptr(unsigned long fat_pointer)
 #ifdef __KHP_INSTRUMENT__
 /* Must be marked as pure so that LLVM can optimize dead code away properly. */
 __attribute__((pure)) void *__khp_unsafe_decode(void *ptr);
+
+void khp_non_canonical_bug(void *);
+/*
+ * For when you don't immediately access memory, but instead are planning to
+ * convert the pointer into a physical address or so.
+ */
+#define khp_unsafe_decode_noderef(ptr) ({				\
+	void *ptr__ = __khp_unsafe_decode((void*)(ptr));		\
+	unsigned long ptr_type__ = ((unsigned long)ptr__) >> 62;	\
+	if (ptr_type__ == 1 || ptr_type__ == 2) {			\
+		/* will not return */					\
+		khp_non_canonical_bug(ptr__);				\
+	}								\
+	(__typeof__(ptr))ptr__;						\
+})
 #else
 static __always_inline void *__khp_unsafe_decode(void *ptr) { return ptr; }
+#define khp_unsafe_decode_noderef(ptr) (ptr)
 #endif
 
 #define khp_unsafe_decode(ptr) ( (__typeof__(ptr))__khp_unsafe_decode((void*)(ptr)) )

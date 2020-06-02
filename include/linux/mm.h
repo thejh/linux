@@ -1576,7 +1576,25 @@ static inline void clear_page_pfmemalloc(struct page *page)
  */
 extern void pagefault_out_of_memory(void);
 
+/*
+ * Calling offset_in_page() on a KHP object whose base is not page-aligned
+ * indicates that the caller is probably going to do something weird; warn and
+ * require a manual fixup in the caller.
+ * NOTE: This is sometimes actually called with length values instead of
+ * pointers. We assume that those will not reach pow(2,62).
+ */
+#ifdef CONFIG_KHP_DEBUG
+#define offset_in_page(p) ({							\
+	unsigned long p_ = (unsigned long)(p);					\
+	if (is_khp_tagged_ptr(p_)) {						\
+		unsigned long raw_ptr_ = khp_unsafe_decode(p_);			\
+		WARN_ON((p_ ^ raw_ptr_) & ~PAGE_MASK);				\
+	}									\
+	p_ & ~PAGE_MASK;							\
+})
+#else
 #define offset_in_page(p)	((unsigned long)(p) & ~PAGE_MASK)
+#endif
 
 /*
  * Flags passed to show_mem() and show_free_areas() to suppress output in

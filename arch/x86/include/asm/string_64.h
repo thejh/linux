@@ -4,6 +4,7 @@
 
 #ifdef __KERNEL__
 #include <linux/jump_label.h>
+#include <asm-generic/khp.h>
 
 /* Written 2002 by Andi Kleen */
 
@@ -25,7 +26,7 @@ static inline void *memset16(uint16_t *s, uint16_t v, size_t n)
 	asm volatile("rep\n\t"
 		     "stosw"
 		     : "=&c" (d0), "=&D" (d1)
-		     : "a" (v), "1" (s), "0" (n)
+		     : "a" (v), "1" (khp_unsafe_decode(s)), "0" (n)
 		     : "memory");
 	return s;
 }
@@ -37,7 +38,7 @@ static inline void *memset32(uint32_t *s, uint32_t v, size_t n)
 	asm volatile("rep\n\t"
 		     "stosl"
 		     : "=&c" (d0), "=&D" (d1)
-		     : "a" (v), "1" (s), "0" (n)
+		     : "a" (v), "1" (khp_unsafe_decode(s)), "0" (n)
 		     : "memory");
 	return s;
 }
@@ -49,7 +50,7 @@ static inline void *memset64(uint64_t *s, uint64_t v, size_t n)
 	asm volatile("rep\n\t"
 		     "stosq"
 		     : "=&c" (d0), "=&D" (d1)
-		     : "a" (v), "1" (s), "0" (n)
+		     : "a" (v), "1" (khp_unsafe_decode(s)), "0" (n)
 		     : "memory");
 	return s;
 }
@@ -105,6 +106,8 @@ DECLARE_STATIC_KEY_FALSE(mcsafe_key);
 static __always_inline __must_check unsigned long
 memcpy_mcsafe(void *dst, const void *src, size_t cnt)
 {
+	dst = khp_unsafe_decode(dst);
+	src = khp_unsafe_decode(src);
 #ifdef CONFIG_X86_MCE
 	if (static_branch_unlikely(&mcsafe_key))
 		return __memcpy_mcsafe(dst, src, cnt);
@@ -119,6 +122,8 @@ memcpy_mcsafe(void *dst, const void *src, size_t cnt)
 void __memcpy_flushcache(void *dst, const void *src, size_t cnt);
 static __always_inline void memcpy_flushcache(void *dst, const void *src, size_t cnt)
 {
+	dst = khp_unsafe_decode(dst);
+	src = khp_unsafe_decode(src);
 	if (__builtin_constant_p(cnt)) {
 		switch (cnt) {
 			case 4:

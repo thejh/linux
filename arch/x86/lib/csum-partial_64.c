@@ -79,7 +79,7 @@ static unsigned do_csum(const unsigned char *buff, unsigned len)
 				    "adcq 7*8(%[src]),%[res]\n\t"
 				    "adcq %[zero],%[res]"
 				    : [res] "=r" (result)
-				    : [src] "r" (buff), [zero] "r" (zero),
+				    : [src] "r" (khp_unsafe_decode(buff)), [zero] "r" (zero),
 				    "[res]" (result));
 				buff += 64;
 				count64--;

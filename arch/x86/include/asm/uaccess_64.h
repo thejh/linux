@@ -8,6 +8,7 @@
 #include <linux/compiler.h>
 #include <linux/lockdep.h>
 #include <linux/kasan-checks.h>
+#include <asm-generic/khp.h>
 #include <asm/alternative.h>
 #include <asm/cpufeatures.h>
 #include <asm/page.h>
@@ -28,6 +29,9 @@ static __always_inline __must_check unsigned long
 copy_user_generic(void *to, const void *from, unsigned len)
 {
 	unsigned ret;
+
+	from = khp_unsafe_decode(from);
+	to = khp_unsafe_decode(to);
 
 	/*
 	 * If CPU has ERMS feature, use copy_user_enhanced_fast_string.

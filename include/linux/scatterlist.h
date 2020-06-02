@@ -142,6 +142,15 @@ static inline void sg_set_buf(struct scatterlist *sg, const void *buf,
 #ifdef CONFIG_DEBUG_SG
 	BUG_ON(!virt_addr_valid(buf));
 #endif
+
+	/*
+	 * This doesn't protect against UAF through the scatterlist
+	 * consumer, but it's the best we can do here without adding
+	 * tracking logic throughout the sg code, or something like
+	 * that.
+	 */
+	buf = khp_unsafe_decode(buf);
+
 	sg_set_page(sg, virt_to_page(buf), buflen, offset_in_page(buf));
 }
 

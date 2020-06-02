@@ -383,7 +383,7 @@ static void bio_map_kern_endio(struct bio *bio)
 static struct bio *bio_map_kern(struct request_queue *q, void *data,
 		unsigned int len, gfp_t gfp_mask)
 {
-	unsigned long kaddr = (unsigned long)data;
+	unsigned long kaddr = (unsigned long)khp_unsafe_decode_noderef(data);
 	unsigned long end = (kaddr + len + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	unsigned long start = kaddr >> PAGE_SHIFT;
 	const int nr_pages = end - start;
