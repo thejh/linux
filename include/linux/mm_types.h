@@ -124,6 +124,10 @@ struct page {
 					unsigned inuse:16;
 					unsigned objects:15;
 					unsigned frozen:1;
+#ifdef CONFIG_KHP
+					/* mapping from slab to weak pointers */
+					unsigned int khp_base_idx;
+#endif
 				};
 			};
 		};

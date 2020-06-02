@@ -7,6 +7,7 @@
  *        tasks which are handled in sched/fair.c )
  */
 #include "sched.h"
+#include <linux/khp.h>
 
 #include <trace/events/power.h>
 
@@ -243,6 +244,11 @@ static void do_idle(void)
 	__current_set_polling();
 	tick_nohz_idle_enter();
 
+	local_irq_disable();
+	// TODO don't take IRQs with KHP off?
+	khp_kernel_exit();
+	local_irq_enable();
+
 	while (!need_resched()) {
 		rmb();
 
@@ -279,6 +285,9 @@ static void do_idle(void)
 	 * an IPI to fold the state for us.
 	 */
 	preempt_set_need_resched();
+	local_irq_disable();
+	khp_kernel_entry();
+	local_irq_enable();
 	tick_nohz_idle_exit();
 	__current_clr_polling();
 

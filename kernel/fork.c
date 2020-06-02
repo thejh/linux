@@ -817,7 +817,7 @@ void __init fork_init(void)
 	task_struct_whitelist(&useroffset, &usersize);
 	task_struct_cachep = kmem_cache_create_usercopy("task_struct",
 			arch_task_struct_size, align,
-			SLAB_PANIC|SLAB_ACCOUNT,
+			SLAB_PANIC|SLAB_ACCOUNT|SLAB_NOKHP,
 			useroffset, usersize, NULL);
 #endif
 

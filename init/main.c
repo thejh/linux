@@ -94,6 +94,7 @@
 #include <linux/rodata_test.h>
 #include <linux/jump_label.h>
 #include <linux/mem_encrypt.h>
+#include <linux/khp.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -808,6 +809,7 @@ static void __init mm_init(void)
 	init_debug_pagealloc();
 	report_meminit();
 	mem_init();
+	khp_init();
 	kmem_cache_init();
 	kmemleak_init();
 	pgtable_init();
@@ -953,6 +955,7 @@ asmlinkage __visible void __init start_kernel(void)
 	perf_event_init();
 	profile_init();
 	call_function_init();
+	khp_kernel_entry();
 	WARN(!irqs_disabled(), "Interrupts were enabled early\n");
 
 	early_boot_irqs_disabled = false;

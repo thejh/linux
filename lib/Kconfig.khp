@@ -6,6 +6,9 @@ if HAVE_ARCH_KHP
 config KHP
   bool "KHP: kernel heap protector"
   depends on SLUB && !KASAN
+  select RANDOMIZE_BASE
+  select CONTEXT_TRACKING
+  select CONTEXT_TRACKING_FORCE
   help
     Enables kernel heap protector - runtime memory protection, designed to
     prevent exploitation of use-after-free issues and some cases of heap

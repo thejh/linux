@@ -1518,9 +1518,9 @@ trace_page_fault_entries(struct pt_regs *regs, unsigned long error_code,
 		trace_page_fault_kernel(address, regs, error_code);
 }
 
-dotraplinkage void
-do_page_fault(struct pt_regs *regs, unsigned long hw_error_code,
-		unsigned long address)
+static void
+do_page_fault_(struct pt_regs *regs, unsigned long hw_error_code,
+	       unsigned long address)
 {
 	prefetchw(&current->mm->mmap_sem);
 	trace_page_fault_entries(regs, hw_error_code, address);
@@ -1533,5 +1533,40 @@ do_page_fault(struct pt_regs *regs, unsigned long hw_error_code,
 		do_kern_addr_fault(regs, hw_error_code, address);
 	else
 		do_user_addr_fault(regs, hw_error_code, address);
+}
+NOKPROBE_SYMBOL(do_page_fault_);
+
+#ifdef CONFIG_KHP
+__attribute__((no_sanitize("kernel")))
+#endif
+dotraplinkage void
+do_page_fault(struct pt_regs *regs, unsigned long hw_error_code,
+		unsigned long address)
+{
+#ifdef CONFIG_KHP
+	extern char khp_first_metadata_access[];
+	extern char khp_meta_not_present_fixup[];
+	unsigned long hw_error_mask = X86_PF_PROT | X86_PF_USER | X86_PF_RSVD |
+				      X86_PF_INSTR | X86_PF_PK;
+	bool kernel_np_data_fault = (hw_error_code & hw_error_mask) == 0;
+
+	/*
+	 * Before any KHP-instrumented code runs, we need to fix up the
+	 * (unlikely) case of a speculative __khp_decode_ptr() invocation with
+	 * a garbage argument that looks like an encoded pointer with an object
+	 * index referring to unallocated metadata memory.
+	 * This must run first to eliminate the possibility of recursive
+	 * __khp_decode_ptr() faults.
+	 * Only do this if the error code indicates a kernel-mode access failing
+	 * because of a not-present PTE.
+	 */
+	if (unlikely(kernel_np_data_fault &&
+		     regs->ip == (unsigned long)khp_first_metadata_access)) {
+		regs->ip = (unsigned long)khp_meta_not_present_fixup;
+		return;
+	}
+#endif
+
+	do_page_fault_(regs, hw_error_code, address);
 }
 NOKPROBE_SYMBOL(do_page_fault);

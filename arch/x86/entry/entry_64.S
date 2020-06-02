@@ -300,6 +300,13 @@ SYM_FUNC_START(__switch_to_asm)
 	movq	%rbx, PER_CPU_VAR(fixed_percpu_data) + stack_canary_offset
 #endif
 
+#ifdef CONFIG_KHP
+	movq PER_CPU_VAR(fixed_percpu_data) + khp_pcpu_pin_head_offset, %rbx
+	movq khp_task_pin_head_offset(%rsi), %r12
+	movq %r12, PER_CPU_VAR(fixed_percpu_data) + khp_pcpu_pin_head_offset
+	movq %rbx, khp_task_pin_head_offset(%rdi)
+#endif
+
 #ifdef CONFIG_RETPOLINE
 	/*
 	 * When switching from a shallower to a deeper call stack
@@ -1736,6 +1743,10 @@ SYM_CODE_START(rewind_stack_do_exit)
 	UNWIND_HINT_FUNC
 	/* Prevent any naive code from trying to unwind to our caller. */
 	xorl	%ebp, %ebp
+
+#ifdef CONFIG_KHP
+	movq $0, PER_CPU_VAR(fixed_percpu_data) + khp_pcpu_pin_head_offset
+#endif
 
 	movq	PER_CPU_VAR(cpu_current_top_of_stack), %rax
 	leaq	-PTREGS_SIZE(%rax), %rsp

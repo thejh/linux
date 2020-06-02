@@ -9,6 +9,10 @@
 #include <asm/kvm_para.h>
 #endif
 
+#ifdef CONFIG_KHP
+#include <asm-generic/khp.h>
+#endif
+
 int main(void)
 {
 #ifdef CONFIG_PARAVIRT
@@ -66,5 +70,21 @@ int main(void)
 	DEFINE(stack_canary_offset, offsetof(struct fixed_percpu_data, stack_canary));
 	BLANK();
 #endif
+
+#ifdef CONFIG_KHP
+	/* struct khp_meta */
+	DEFINE(khp_raw_ptr_offset, offsetof(struct khp_meta, khp_raw_ptr));
+	DEFINE(khp_cookie_offset, offsetof(struct khp_meta, khp_cookie));
+	DEFINE(khp_second_half_offset, offsetof(struct khp_meta, halves[1]));
+	DEFINE(khp_extag_and_cpu_offset, offsetof(struct khp_meta, lar.etac));
+	BLANK();
+	/* fixed_percpu_data */
+	DEFINE(khp_pcpu_pin_head_offset, offsetof(struct fixed_percpu_data, khp_pcpu_pin_head));
+	BLANK();
+	/* task_struct */
+	DEFINE(khp_task_pin_head_offset, offsetof(struct task_struct, thread.khp_pin_head));
+	BLANK();
+#endif
+
 	return 0;
 }

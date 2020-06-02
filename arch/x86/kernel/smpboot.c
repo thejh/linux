@@ -55,6 +55,7 @@
 #include <linux/gfp.h>
 #include <linux/cpuidle.h>
 #include <linux/numa.h>
+#include <linux/khp.h>
 
 #include <asm/acpi.h>
 #include <asm/desc.h>
@@ -255,6 +256,8 @@ static void notrace start_secondary(void *unused)
 	unlock_vector_lock();
 	cpu_set_state_online(smp_processor_id());
 	x86_platform.nmi_init();
+
+	khp_kernel_entry();
 
 	/* enable local interrupts */
 	local_irq_enable();
@@ -1016,6 +1019,10 @@ int common_cpu_up(unsigned int cpu, struct task_struct *idle)
 	ret = irq_init_percpu_irqstack(cpu);
 	if (ret)
 		return ret;
+
+#ifdef CONFIG_KHP
+	per_cpu(fixed_percpu_data.khp_pcpu_pin_head, cpu) = 0;
+#endif
 
 #ifdef CONFIG_X86_32
 	/* Stack for startup_32 can be just as for start_secondary onwards */

@@ -112,6 +112,14 @@
 #define SLAB_KASAN		0
 #endif
 
+#ifdef CONFIG_KHP
+#define SLAB_KHP		((slab_flags_t __force)0x10000000U)
+#define SLAB_NOKHP		((slab_flags_t __force)0x20000000U)
+#else
+#define SLAB_KHP		0
+#define SLAB_NOKHP		0
+#endif
+
 /* The following flags affect the page allocator grouping pages by mobility */
 /* Objects are reclaimable */
 #define SLAB_RECLAIM_ACCOUNT	((slab_flags_t __force)0x00020000U)

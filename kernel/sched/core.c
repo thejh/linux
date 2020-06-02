@@ -11,6 +11,7 @@
 #include <linux/nospec.h>
 
 #include <linux/kcov.h>
+#include <linux/khp.h>
 
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
@@ -1738,6 +1739,7 @@ void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 			p->sched_class->migrate_task_rq(p, new_cpu);
 		p->se.nr_migrations++;
 		rseq_migrate(p);
+		khp_migrate(p);
 		perf_event_task_migrate(p);
 	}
 
@@ -3135,6 +3137,17 @@ static inline void
 prepare_task_switch(struct rq *rq, struct task_struct *prev,
 		    struct task_struct *next)
 {
+	/*
+	 * For now, idle tasks have no protection whatsoever against KHP TOCTOU.
+	 * Fixing this nicely will require marking the entire call path from
+	 * cpu_startup_entry() to the KHP-idle sections with some magic function
+	 * attribute that ensures that all the KHP stack slots on the way are
+	 * zeroed out; same thing for the actual KHP-idle section.
+	 */
+	if (next->sched_class != &idle_sched_class)
+		khp_stack_scan(next, -1);
+	khp_assert_active();
+
 	kcov_prepare_switch(prev);
 	sched_info_switch(rq, prev, next);
 	perf_event_task_sched_out(prev, next);
@@ -3202,6 +3215,8 @@ static struct rq *finish_task_switch(struct task_struct *prev)
 	prev_state = prev->state;
 	vtime_task_switch(prev);
 	perf_event_task_sched_in(prev, current);
+	if (prev->sched_class != &idle_sched_class)
+		khp_stack_scan(prev, 1);
 	finish_task(prev);
 	finish_lock_switch(rq);
 	finish_arch_post_lock_switch();

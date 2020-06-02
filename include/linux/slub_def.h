@@ -136,6 +136,11 @@ struct kmem_cache {
 	struct kasan_cache kasan_info;
 #endif
 
+#ifdef CONFIG_KHP
+	spinlock_t khp_detached_head_lock;
+	unsigned int khp_detached_head;
+#endif
+
 	unsigned int useroffset;	/* Usercopy region offset */
 	unsigned int usersize;		/* Usercopy region size */
 

@@ -21,6 +21,7 @@
 #include <linux/hardirq.h>
 #include <linux/export.h>
 #include <linux/kprobes.h>
+#include <linux/khp.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/context_tracking.h>
@@ -81,6 +82,7 @@ void __context_tracking_enter(enum ctx_state state)
 				vtime_user_enter(current);
 			}
 			rcu_user_enter();
+			khp_kernel_exit();
 		}
 		/*
 		 * Even if context tracking is disabled on this CPU, because it's outside
@@ -153,6 +155,7 @@ void __context_tracking_exit(enum ctx_state state)
 			 * We are going to run code that may use RCU. Inform
 			 * RCU core about that (ie: we may need the tick again).
 			 */
+			khp_kernel_entry();
 			rcu_user_exit();
 			if (state == CONTEXT_USER) {
 				vtime_user_exit(current);

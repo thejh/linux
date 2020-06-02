@@ -27,6 +27,9 @@ struct vm86;
 #include <asm/unwind_hints.h>
 #include <asm/vmxfeatures.h>
 #include <asm/vdso/processor.h>
+#ifdef CONFIG_KHP
+#include <asm-generic/khp.h>
+#endif
 
 #include <linux/personality.h>
 #include <linux/cache.h>
@@ -441,7 +444,8 @@ struct fixed_percpu_data {
 	 * irq_stack is the object at %gs:0, we reserve the bottom
 	 * 48 bytes of the irq stack for the canary.
 	 */
-	char		gs_base[40];
+	char		gs_base[32];
+	unsigned long	khp_pcpu_pin_head;
 	unsigned long	stack_canary;
 };
 
@@ -542,6 +546,10 @@ struct thread_struct {
 	mm_segment_t		addr_limit;
 
 	unsigned int		sig_on_uaccess_err:1;
+
+#ifdef CONFIG_KHP
+	struct khp_pins_frame	*khp_pin_head;
+#endif
 
 	/* Floating point and extended processor state */
 	struct fpu		fpu;

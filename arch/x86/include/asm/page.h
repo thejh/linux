@@ -16,6 +16,7 @@
 
 #ifndef __ASSEMBLY__
 
+#include <asm-generic/khp.h>
 struct page;
 
 #include <linux/range.h>
@@ -66,7 +67,14 @@ static inline void copy_user_page(void *to, void *from, unsigned long vaddr,
  * virt_to_page(kaddr) returns a valid pointer if and only if
  * virt_addr_valid(kaddr) returns true.
  */
-#define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
+#define virt_to_page(kaddr)	({					\
+	void *kaddr_ = (void*)(kaddr);					\
+	if (is_khp_tagged_ptr((unsigned long)kaddr_)) {			\
+		/*WARN(1, "virt_to_page(0x%lx)", (unsigned long)kaddr_);*/ \
+		kaddr_ = khp_unsafe_decode(kaddr_);			\
+	}								\
+	pfn_to_page(__pa(kaddr_) >> PAGE_SHIFT);			\
+})
 #define pfn_to_kaddr(pfn)      __va((pfn) << PAGE_SHIFT)
 extern bool __virt_addr_valid(unsigned long kaddr);
 #define virt_addr_valid(kaddr)	__virt_addr_valid((unsigned long) (kaddr))
