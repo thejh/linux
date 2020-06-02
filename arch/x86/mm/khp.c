@@ -4,11 +4,15 @@
 #include <asm/text-patching.h>
 
 /* returns false on error */
-static inline void handle_pin(struct khp_meta *pin, int direction)
+static inline void handle_pin(struct khp_meta *pin, int direction,
+			      bool migrated)
 {
 	if (direction == 1) {
 		khp_refcount_inc(pin);
 	} else {
+		if (migrated)
+			khp_mark_migrated_global(pin);
+
 		khp_refcount_dec(pin, false, 0);
 	}
 }
@@ -22,6 +26,16 @@ void khp_stack_scan(struct task_struct *task, int direction) {
 	struct khp_meta *orig_end = READ_ONCE(khp_orig_region.used_end);
 	struct khp_meta *fb_start = khp_fallback_region.start;
 	struct khp_meta *fb_end = READ_ONCE(khp_fallback_region.used_end);
+	bool migrated = test_bit(KHP_MIGRATED_BIT, &task->khp_flags);
+
+	/*
+	 * Note: KHP_MIGRATED_BIT can be set on direction +1 if we failed the
+	 * last khp_stack_scan().
+	 * That means we lost KHP protection for a bit, and it shouldn't happen,
+	 * but we might be able to go on.
+	 */
+	if (migrated && direction == 1)
+		printk_deferred(KERN_EMERG "khp_stack_scan() switching MIGRATED task to refcounted mode\n");
 
 	while (pin_frame != NULL) {
 		int i;
@@ -77,11 +91,14 @@ void khp_stack_scan(struct task_struct *task, int direction) {
 			}
 #endif
 
-			handle_pin(pin, direction);
+			handle_pin(pin, direction, migrated);
 		}
 
 		pin_frame = pin_frame->next_pin_frame;
 	}
+
+	if (migrated)
+		clear_bit(KHP_MIGRATED_BIT, &task->khp_flags);
 }
 
 struct khp_movabs {

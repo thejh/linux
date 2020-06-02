@@ -25,6 +25,9 @@
 
 DEFINE_PER_CPU_READ_MOSTLY(int, cpu_number);
 EXPORT_PER_CPU_SYMBOL(cpu_number);
+#ifdef CONFIG_KHP
+DEFINE_PER_CPU_READ_MOSTLY(unsigned int, cpu_fixedhamming_id);
+#endif
 
 #ifdef CONFIG_X86_64
 #define BOOT_PERCPU_OFFSET ((unsigned long)__per_cpu_load)
@@ -169,6 +172,7 @@ void __init setup_per_cpu_areas(void)
 {
 	unsigned int cpu;
 	unsigned long delta;
+	unsigned char fixedhamming_id = 0;
 	int rc;
 
 	pr_info("NR_CPUS:%d nr_cpumask_bits:%d nr_cpu_ids:%u nr_node_ids:%u\n",
@@ -263,6 +267,18 @@ void __init setup_per_cpu_areas(void)
 		 */
 		if (!cpu)
 			switch_to_new_gdt(cpu);
+
+#ifdef CONFIG_KHP
+		/*
+		 * Allocate per-cpu identifiers such that for identifiers A and
+		 * B, `(~A) & B != 0` is guaranteed to hold.
+		 */
+		do {
+			fixedhamming_id++;
+		} while (hweight8(fixedhamming_id) != 4);
+		per_cpu(cpu_fixedhamming_id, cpu) = fixedhamming_id;
+		pr_warn("cpu_fixedhamming_id[%d] = 0x%hhx\n", cpu, per_cpu(cpu_fixedhamming_id, cpu));
+#endif
 	}
 
 	/* indicate the early static arrays will soon be gone */
@@ -295,4 +311,9 @@ void __init setup_per_cpu_areas(void)
 	 * this call?
 	 */
 	sync_initial_page_table();
+
+#ifdef CONFIG_KHP
+	pr_warn("cpu_fixedhamming_id setup should be done; raw_cpu_fixedhamming_id() = 0x%x on CPU %d\n",
+		raw_cpu_fixedhamming_id(), raw_smp_processor_id());
+#endif
 }

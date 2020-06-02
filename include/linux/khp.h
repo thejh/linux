@@ -49,6 +49,7 @@ void khp_mark_free(struct kmem_cache *s, void *ptr);
 
 /* for arch stack walking code */
 void khp_refcount_inc(struct khp_meta *meta);
+void khp_mark_migrated_global(struct khp_meta *meta);
 void khp_refcount_dec(struct khp_meta *meta, bool freeing, u16 expected_cookie);
 
 bool ptr_is_khp_alias(void *ptr);

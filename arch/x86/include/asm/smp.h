@@ -28,6 +28,9 @@ DECLARE_PER_CPU_READ_MOSTLY(cpumask_var_t, cpu_die_map);
 DECLARE_PER_CPU_READ_MOSTLY(cpumask_var_t, cpu_llc_shared_map);
 DECLARE_PER_CPU_READ_MOSTLY(u16, cpu_llc_id);
 DECLARE_PER_CPU_READ_MOSTLY(int, cpu_number);
+#ifdef CONFIG_KHP
+DECLARE_PER_CPU_READ_MOSTLY(unsigned int, cpu_fixedhamming_id);
+#endif
 
 static inline struct cpumask *cpu_llc_shared_mask(int cpu)
 {
@@ -166,6 +169,10 @@ __visible void smp_call_function_single_interrupt(struct pt_regs *r);
  */
 #define raw_smp_processor_id()  this_cpu_read(cpu_number)
 #define __smp_processor_id() __this_cpu_read(cpu_number)
+
+#ifdef CONFIG_KHP
+#define raw_cpu_fixedhamming_id() this_cpu_read(cpu_fixedhamming_id)
+#endif
 
 #ifdef CONFIG_X86_32
 extern int safe_smp_processor_id(void);

@@ -135,6 +135,7 @@ static void khp_layout_to_free(struct khp_meta *new, const struct khp_meta *old,
 	new->khp_raw_phys_high16 = (raw_phys >> 32) & 0xffffUL;
 	new->khp_cookie = old->khp_cookie;
 	new->khp_extag = queueing ? KHP_ETT_QUEUED : KHP_ETT_FLOATING;
+	new->lar.etac.khp_cpu_mask_inv = old->lar.etac.khp_cpu_mask_inv;
 	new->lar.khp_refcount = old->lar.khp_refcount;
 }
 
@@ -227,6 +228,13 @@ static void khp_actually_free(struct khp_meta *meta)
 	 * the object is put into the delayed-freeing machinery.
 	 */
 	___cache_free(page->slab_cache, raw_ptr, 0);
+}
+
+void khp_mark_migrated_global(struct khp_meta *meta)
+{
+	WRITE_ONCE(meta->lar.etac.khp_cpu_mask_inv, KHP_CPU_MASK_INV_GLOBAL);
+	/* order with subsequent refcount modification */
+	smp_mb__before_atomic();
 }
 
 static void khp_extag_queued_refresh(u8 *extag_)
@@ -778,6 +786,7 @@ void *khp_init_alloc(int cpu, unsigned int obj_idx, void *raw_ptr,
 	fat_pointer |= (unsigned long)m->khp_cookie << 16;
 
 	WRITE_ONCE(m->khp_raw_ptr, raw_ptr);
+	WRITE_ONCE(m->lar.etac.khp_cpu_mask_inv, ~raw_cpu_fixedhamming_id());
 	/*
 	 * This normally lifts the refcount from 0 to 1, except that there may
 	 * be extra references from (speculative) decodes of free pointers; so
@@ -968,10 +977,9 @@ static void khp_batch_process(u32 free_head, bool is_global_list)
 				meta_new.khp_extag = KHP_ETT_FLOATING;
 				if (!khp_update(meta, &meta_old, &meta_new))
 					continue; /* retry */
-			} else if (!is_global_list) {
+			} else if (!is_global_list && meta_old.lar.etac.khp_cpu_mask_inv == KHP_CPU_MASK_INV_GLOBAL) {
 				/*
-				 * The object may have been touched by a
-				 * different CPU at
+				 * The object was touched by a different CPU at
 				 * some point. We have to shove it to the global
 				 * queue (from where it can be picked up once
 				 * all CPUs have confirmed that it is no longer

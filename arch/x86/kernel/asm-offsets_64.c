@@ -77,6 +77,7 @@ int main(void)
 	DEFINE(khp_cookie_offset, offsetof(struct khp_meta, khp_cookie));
 	DEFINE(khp_second_half_offset, offsetof(struct khp_meta, halves[1]));
 	DEFINE(khp_extag_and_cpu_offset, offsetof(struct khp_meta, lar.etac));
+	DEFINE(khp_cpu_mask_offset, offsetof(struct khp_meta, lar.etac.khp_cpu_mask_inv));
 	BLANK();
 	/* fixed_percpu_data */
 	DEFINE(khp_pcpu_pin_head_offset, offsetof(struct fixed_percpu_data, khp_pcpu_pin_head));

@@ -92,7 +92,8 @@ struct khp_meta {
 				 */
 				u16 khp_refcount;
 				struct khp_extag_and_cpu {
-					u8 unused0;
+					#define KHP_CPU_MASK_INV_GLOBAL 0U
+					u8 khp_cpu_mask_inv;
 
 					/* high 2 bits of khp_extag (type): */
 					#define KHP_ETT_MASK     0xc0

@@ -69,11 +69,19 @@ SYM_INNER_LABEL(khp_region_start_movabs_shifted, SYM_L_GLOBAL)
 	 */
 	mov %r11, (%rsi)
 
+	/*
+	 * Track whether this allocation is being accessed from a foreign CPU
+	 * while marked as CPU-local. If so, remove the CPU-local marker.
+	 */
+	movl PER_CPU_VAR(cpu_fixedhamming_id), %eax
+SYM_INNER_LABEL(khp_first_metadata_access, SYM_L_GLOBAL)
+	testb %al, khp_cpu_mask_offset(%r11)
+	jnz .Lnonlocal_slowpath
+
 .Lpointer_load:
 	/* Assign rax = raw pointer, ready for function return. */
 	xor %eax, %eax
 	mov %di, %ax
-SYM_INNER_LABEL(khp_first_metadata_access, SYM_L_GLOBAL)
 	add khp_raw_ptr_offset(%r11), %rax
 
 	/*
@@ -104,6 +112,40 @@ SYM_INNER_LABEL(khp_first_metadata_access, SYM_L_GLOBAL)
 	movq %rdi, %rax
 	ret
 
+
+.Lnonlocal_slowpath:
+	push %rbx
+
+	/*
+	 * Mark the allocation as global. While a use-after-free write here is
+	 * conceptually not a big problem, it would be nicer to avoid it if the
+	 * object has already been switched to free layout.
+	 * Therefore, use cmpxchg to atomically verify the object layout type
+	 * when performing the write.
+	 *
+	 * rax = (extag << 8) | old_cpu_offset
+	 * rbx = (extag << 8)
+	 */
+	movq %rdi, %rbx
+	shr $48, %rbx      /* derive extag from encoded pointer */
+	and $0xff00, %ebx
+	movl %ebx, %eax
+	movb khp_cpu_mask_offset(%r11), %al
+
+	cmpxchgw %bx, khp_extag_and_cpu_offset(%r11)
+	jne .Lnonlocal_zeroing_failed
+.Lnonlocal_zeroing_raced:
+
+	pop %rbx
+	jmp .Lpointer_load
+
+
+.Lnonlocal_zeroing_failed:
+	cmp %eax, %ebx
+	je .Lnonlocal_zeroing_raced
+	/* UAF either with a tight race or with different extag */
+	pop %rbx
+	jmp .Ldecode_fail
 
 /* PF handler will jump us here if khp_first_metadata_access fails */
 SYM_INNER_LABEL(khp_meta_not_present_fixup, SYM_L_GLOBAL)
