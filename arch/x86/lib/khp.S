@@ -114,6 +114,26 @@ SYM_INNER_LABEL(khp_first_metadata_access, SYM_L_GLOBAL)
 
 
 .Lnonlocal_slowpath:
+#ifdef CONFIG_KHP_DEBUG
+	pushf
+	ASM_CLAC
+	push %r11
+	push %r15
+
+	mov PER_CPU_VAR(current_task), %r15
+	lea TASK_khp_recursion(%r15), %r15
+	cmpl $0, (%r15)
+	jne .Lnonlocal_skip_debug
+	incl (%r15)
+	call __khp_mark_global_debug
+	decl (%r15)
+
+.Lnonlocal_skip_debug:
+	pop %r15
+	pop %r11
+	popf
+#endif
+
 	push %rbx
 
 	/*

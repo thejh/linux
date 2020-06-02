@@ -78,6 +78,9 @@ int main(void)
 	DEFINE(khp_second_half_offset, offsetof(struct khp_meta, halves[1]));
 	DEFINE(khp_extag_and_cpu_offset, offsetof(struct khp_meta, lar.etac));
 	DEFINE(khp_cpu_mask_offset, offsetof(struct khp_meta, lar.etac.khp_cpu_mask_inv));
+#ifdef CONFIG_KHP_DEBUG
+	DEFINE(TASK_khp_recursion, offsetof(struct task_struct, khp_recursion));
+#endif
 	BLANK();
 	/* fixed_percpu_data */
 	DEFINE(khp_pcpu_pin_head_offset, offsetof(struct fixed_percpu_data, khp_pcpu_pin_head));

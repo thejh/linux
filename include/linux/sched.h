@@ -1291,6 +1291,9 @@ struct task_struct {
 
 #ifdef CONFIG_KHP
 	unsigned long			khp_flags;
+#ifdef CONFIG_KHP_DEBUG
+	unsigned int			khp_recursion;
+#endif
 #endif
 
 	/*
