@@ -1,0 +1,1 @@
+extern atomic_long_t khp_stat_global_frees, khp_stat_local_frees;

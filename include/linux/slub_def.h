@@ -139,6 +139,9 @@ struct kmem_cache {
 #ifdef CONFIG_KHP
 	spinlock_t khp_detached_head_lock;
 	unsigned int khp_detached_head;
+
+	atomic_long_t khp_stat_global_frees;
+	atomic_long_t khp_stat_local_frees;
 #endif
 
 	unsigned int useroffset;	/* Usercopy region offset */

@@ -5314,6 +5314,13 @@ static ssize_t destroy_by_rcu_show(struct kmem_cache *s, char *buf)
 }
 SLAB_ATTR_RO(destroy_by_rcu);
 
+#ifdef CONFIG_KHP
+static ssize_t khp_churn_show(struct kmem_cache *s, char *buf) {
+	return sprintf(buf, "%d %d\n", atomic_long_read(&s->khp_stat_global_frees), atomic_long_read(&s->khp_stat_local_frees));
+}
+SLAB_ATTR_RO(khp_churn);
+#endif
+
 #ifdef CONFIG_SLUB_DEBUG
 static ssize_t slabs_show(struct kmem_cache *s, char *buf)
 {
@@ -5625,6 +5632,9 @@ static struct attribute *slab_attrs[] = {
 	&hwcache_align_attr.attr,
 	&reclaim_account_attr.attr,
 	&destroy_by_rcu_attr.attr,
+#ifdef CONFIG_KHP
+	&khp_churn_attr.attr,
+#endif
 	&shrink_attr.attr,
 	&slabs_cpu_partial_attr.attr,
 #ifdef CONFIG_SLUB_DEBUG

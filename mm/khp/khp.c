@@ -18,6 +18,7 @@
 #include <asm/pgalloc.h>
 #include "../slab.h"
 #include "../internal.h"
+#include "internal.h"
 
 #define KHP_META_PER_LINE (L1_CACHE_BYTES / sizeof(struct khp_meta))
 
@@ -914,6 +915,17 @@ void khp_mark_free(struct kmem_cache *s, void *ptr) {
 
 	/* be careful about using @m in case this is a double-free! */
 	m = khp_region_start + obj_idx;
+
+	cpu_fhid_inv = READ_ONCE(m->lar.etac.khp_cpu_mask_inv);
+	if (cpu_fhid_inv == 0) {
+		atomic_long_inc(&khp_stat_global_frees);
+		atomic_long_inc(&s->khp_stat_global_frees);
+	} else {
+		cpu_fhid = ~cpu_fhid_inv;
+		BUG_ON(hweight8(cpu_fhid) != 4);
+		atomic_long_inc(&khp_stat_local_frees);
+		atomic_long_inc(&s->khp_stat_local_frees);
+	}
 
 	khp_refcount_dec(m, true, cookie);
 }
