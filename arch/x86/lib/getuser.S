@@ -54,6 +54,20 @@ SYM_FUNC_START(\name)
 	sbb %_ASM_DX, %_ASM_DX
 	and %_ASM_DX, %_ASM_AX
 
+#ifdef CONFIG_KHP
+	/*
+	 * Jump into the slowpath if the pointer is either a raw kernel pointer
+	 * (high bits 11) or a KHP-encoded pointer (high bits 01/10).
+	 * This should be after the address limit check to avoid passing
+	 * userspace-controlled values into the KHP infrastructure when
+	 * possible.
+	 */
+	mov %rax, %rdx
+	shr $62, %rdx
+	jnz 3f
+4:
+#endif
+
 	ASM_STAC
 
 	.if \size == 8 && IS_ENABLED(CONFIG_X86_32)
@@ -68,6 +82,62 @@ SYM_FUNC_START(\name)
 	xor %eax,%eax
 	ASM_CLAC
 	ret
+
+#ifdef CONFIG_KHP
+3:
+	/*
+	 * If we are dealing with a plain kernel pointer, jump back into
+	 * fastpath.
+	 */
+	cmp $3, %rdx
+	je 4b
+
+	/*
+	 * Setup scratch registers (also necessary for __khp_decode_ptr calling
+	 * convention).
+	 */
+	pushq %rdi
+	pushq %rsi
+	pushq %r11
+
+	/* Create KHP pin area and push it on the list. */
+	pushq $0 /* reserve pin slot */
+	mov %rsp, %rsi /* pass slot to __khp_decode_ptr as arg2 */
+	pushq $1 /* pin count */
+	pushq PER_CPU_VAR(fixed_percpu_data) + khp_pcpu_pin_head_offset
+	movq %rsp, PER_CPU_VAR(fixed_percpu_data) + khp_pcpu_pin_head_offset
+
+	/*
+	 * Decode the pointer. Note that __khp_decode_ptr uses a special calling
+	 * convention!
+	 */
+	movq %rax, %rdi
+	call __khp_decode_ptr
+
+	ASM_STAC
+	.if \size == 8
+5:	\mov_insn -\size + 1(%rax), %rdx
+	.else
+5:	\mov_insn -\size + 1(%rax), %edx
+	.endif
+	xor %eax,%eax
+6:	ASM_CLAC
+
+	/* restore and return */
+	popq PER_CPU_VAR(fixed_percpu_data) + khp_pcpu_pin_head_offset
+	add $16, %rsp /* pin count and pin slot */
+	popq %r11
+	popq %rsi
+	popq %rdi
+	ret
+
+7:	/* Handle failed uaccess to KHP pointer. */
+	xor %rdx, %rdx
+	mov $(-EFAULT), %rax
+	jmp 6b
+
+	_ASM_EXTABLE_UA(5b, 7b)
+#endif
 SYM_FUNC_END(\name)
 EXPORT_SYMBOL(\name)
 
