@@ -2273,7 +2273,7 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 	}
 
 	/* default is to _not_ leak addresses, hash before printing */
-	return ptr_to_id(buf, end, ptr, spec);
+	return pointer_string(buf, end, ptr, spec);
 }
 
 /*
