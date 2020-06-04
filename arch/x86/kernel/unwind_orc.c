@@ -12,7 +12,7 @@
 
 #define orc_warn_current(args...)					\
 ({									\
-	if (state->task == current)					\
+	if (1)					\
 		orc_warn(args);						\
 })
 
@@ -453,6 +453,7 @@ bool unwind_next_frame(struct unwind_state *state)
 		 */
 		orc = &orc_fp_entry;
 		state->error = true;
+		orc_warn("no orc data for %pB\n", (void*)state->ip);
 	}
 
 	/* End-of-stack check for kernel threads: */
@@ -635,8 +636,10 @@ void __unwind_start(struct unwind_state *state, struct task_struct *task,
 	 * CPU.  This check is racy, but that's ok: the unwinder has other
 	 * checks to prevent it from going off the rails.
 	 */
+#if 0
 	if (task_on_another_cpu(task))
 		goto err;
+#endif
 
 	if (regs) {
 		if (user_mode(regs))

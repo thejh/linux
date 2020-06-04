@@ -17,6 +17,52 @@ static inline void handle_pin(struct khp_meta *pin, int direction,
 	}
 }
 
+#include <asm/unwind.h>
+static void khp_dump_task_stack(struct task_struct *task)
+{
+	struct khp_pins_frame *pin_frame = task->thread.khp_pin_head;
+	struct unwind_state state;
+
+	unwind_start(&state, task, NULL, NULL);
+
+	/* WARNING: dodgy stack pointer comparisons if we have a split stack */
+	while (!unwind_done(&state)) {
+		if (pin_frame && (unsigned long)pin_frame < state.sp) {
+			unsigned long i;
+			pr_emerg("%p: 0x%lx KHP pins:\n", pin_frame, pin_frame->pin_count);
+			if (pin_frame->pin_count > 0x1000) {
+				pr_emerg("BAD PIN COUNT, STOPPING\n");
+				pin_frame = NULL;
+			} else {
+				for (i = 0; i < pin_frame->pin_count; i++) {
+					pr_emerg("  %p\n", pin_frame->pins[i]);
+				}
+				pin_frame = pin_frame->next_pin_frame;
+			}
+		} else {
+			pr_emerg("%p: %pB\n", unwind_get_return_address_ptr(&state), (void*)state.ip);
+			unwind_next_frame(&state);
+		}
+	}
+	pr_emerg("UNWIND DONE, CHECKING REMAINING KHP\n");
+	while (pin_frame) {
+		unsigned long i;
+		pr_emerg("%p: 0x%lx KHP pins:\n", pin_frame, pin_frame->pin_count);
+		if (pin_frame->pin_count > 0x1000) {
+			pr_emerg("BAD PIN COUNT, STOPPING\n");
+			pin_frame = NULL;
+		} else {
+			for (i = 0; i < pin_frame->pin_count; i++) {
+				pr_emerg("  %p\n", pin_frame->pins[i]);
+			}
+			pin_frame = pin_frame->next_pin_frame;
+		}
+	}
+	pr_emerg("UNWIND FULLY DONE\n");
+	show_trace_log_lvl(task, NULL, NULL, KERN_EMERG);
+	pr_emerg("SECOND UNWIND FULLY DONE\n");
+}
+
 /*
  * @direction is either +1 (for adding refcounts) or -1 (for removing refcounts)
  */
@@ -43,7 +89,7 @@ void khp_stack_scan(struct task_struct *task, int direction) {
 
 #ifdef CONFIG_KHP_DEBUG
 		if (pin_count > THREAD_SIZE / sizeof(void*)) {
-			printk_deferred(KERN_EMERG "stack unwind encountered bad pin_count: 0x%lx\n",
+			pr_emerg("stack unwind encountered bad pin_count: 0x%lx\n",
 				pin_count);
 			return;
 		}
@@ -83,10 +129,11 @@ void khp_stack_scan(struct task_struct *task, int direction) {
 			 */
 			if ((pin_ & (sizeof(struct khp_meta)-1)) != 0 ||
 			    ((pin < orig_start || pin >= orig_end) && (pin < fb_start || pin >= fb_end))) {
-				printk_deferred(KERN_EMERG "stack unwind encountered bad weakptr: 0x%lx; should be in [%p,%p) or [%p,%p)\n",
+				pr_emerg("stack unwind encountered bad weakptr: 0x%lx; should be in [%p,%p) or [%p,%p)\n",
 					pin_, orig_start, orig_end, fb_start, fb_end);
-				printk_deferred(KERN_EMERG "  pin_frame at %p: next=%p, count=0x%lx\n",
+				pr_emerg("  pin_frame at %p: next=%p, count=0x%lx\n",
 					pin_frame, pin_frame->next_pin_frame, pin_frame->pin_count);
+				khp_dump_task_stack(task);
 				return;
 			}
 #endif

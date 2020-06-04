@@ -66,10 +66,10 @@ bool in_entry_stack(unsigned long *stack, struct stack_info *info)
 }
 
 static void printk_stack_address(unsigned long address, int reliable,
-				 char *log_lvl)
+				 char *log_lvl, unsigned long *stack)
 {
 	touch_nmi_watchdog();
-	printk("%s %s%pB\n", log_lvl, reliable ? "" : "? ", (void *)address);
+	printk("%s {%p} %s%pB\n", log_lvl, stack, reliable ? "" : "? ", (void *)address);
 }
 
 /*
@@ -255,8 +255,8 @@ void show_trace_log_lvl(struct task_struct *task, struct pt_regs *regs,
 			real_addr = ftrace_graph_ret_addr(task, &graph_idx,
 							  addr, stack);
 			if (real_addr != addr)
-				printk_stack_address(addr, 0, log_lvl);
-			printk_stack_address(real_addr, reliable, log_lvl);
+				printk_stack_address(addr, 0, log_lvl, stack);
+			printk_stack_address(real_addr, reliable, log_lvl, stack);
 
 			if (!reliable)
 				continue;
