@@ -109,6 +109,11 @@ struct khp_meta {
 					/* only valid if TYPE_QUEUED: */
 					#define KHP_SEQ_MASK 0x3
 					#define KHP_EXTAG_GLOBAL_QUEUE 0x4
+					/*
+					 * if TYPE_QUEUED: memory has been
+					 * released to allocator
+					 */
+					#define KHP_EXTAG_RELEASED 0x8
 
 					u8 khp_extag_;
 				} etac;

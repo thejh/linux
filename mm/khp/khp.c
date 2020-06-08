@@ -47,9 +47,6 @@ static struct khp_global_state khp_global = {
 	.global_delay_head = KHP_LIST_END
 };
 
-/* end object index per allocation type (normal / fallback) */
-#define KHP_END_PER_TYPE 0x40000000UL
-
 /*
  * ACTIVE is only toggled by the owning CPU.
  * CHECKIN_REQUESTED and SYNC_REQUESTED may be set by other CPUs, but only if
@@ -68,16 +65,6 @@ static DEFINE_PER_CPU(unsigned long, khp_cpu_flags);
  * Set from anywhere (only if ACTIVE), clear locally.
  */
 #define KHP_CPU_CHECKIN_REQUESTED 0x2UL
-
-static u32 khp_meta_idx(struct khp_meta *meta)
-{
-	return meta - khp_region_start;
-}
-
-static __always_inline struct khp_meta *khp_meta_by_idx(u32 obj_idx)
-{
-	return khp_region_start + obj_idx;
-}
 
 static u32 khp_idx_by_raw(void *raw_ptr)
 {
@@ -111,7 +98,7 @@ void khp_refcount_inc(struct khp_meta *meta)
 	}
 }
 
-static u16 khp_depletion_cookie(struct khp_meta *meta)
+u16 khp_depletion_cookie(struct khp_meta *meta)
 {
 	u32 idx = khp_meta_idx(meta);
 	u16 hash = siphash_1u64(idx, &khp_cookie_key);
@@ -216,6 +203,10 @@ static void khp_actually_free(struct khp_meta *meta)
 			/* TODO: mark meta as depleted for extag feature? */
 		}
 	}
+
+	/* for debugging: permit distinguishing queued and unused identifiers */
+	BUG_ON((meta->khp_extag & KHP_ETT_MASK) != KHP_ETT_QUEUED);
+	WRITE_ONCE(meta->khp_extag, meta->khp_extag | KHP_EXTAG_RELEASED);
 
 	if (unlikely(!PageSlab(page))) {
 		// TODO vmalloc and kmalloc-large support
