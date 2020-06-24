@@ -179,11 +179,78 @@ static struct file_operations khp_dump_fops = {
 	.release = seq_release
 };
 
+static int parse_user_ulong(unsigned long *res, const char __user *buffer,
+			    size_t count, loff_t *ppos)
+{
+	char buf[100];
+
+	if (*ppos != 0 || count >= sizeof(buf))
+		return -EINVAL;
+	if (copy_from_user(buf, buffer, count))
+		return -EFAULT;
+	buf[count] = '\0';
+	return kstrtoul(buf, 16, res);
+}
+
+static ssize_t khp_trigger_crash_write(struct file *file,
+				       const char __user *buffer,
+				       size_t count, loff_t *ppos)
+{
+	unsigned long user_supplied_ptr;
+	int ret;
+
+	ret = parse_user_ulong(&user_supplied_ptr, buffer, count, ppos);
+	if (ret)
+		return ret;
+
+	/* intentionally dereference user-supplied pointer and discard result */
+	*(volatile char *)user_supplied_ptr;
+
+	return 0;
+}
+
+static struct file_operations khp_trigger_crash_fops = {
+	.write = khp_trigger_crash_write
+};
+
+static ssize_t khp_trigger_kernelds_write(struct file *file,
+					  const char __user *buffer,
+					  size_t count, loff_t *ppos)
+{
+	unsigned long user_supplied_ptr;
+	mm_segment_t old_fs;
+	int ret;
+	char dummy;
+
+	ret = parse_user_ulong(&user_supplied_ptr, buffer, count, ppos);
+	if (ret)
+		return ret;
+
+	/*
+	 * intentionally load user-supplied pointer under KERNEL_DS and discard
+	 * result
+	 */
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	ret = get_user(dummy, (char __user *)user_supplied_ptr);
+	set_fs(old_fs);
+
+	return ret;
+}
+
+static struct file_operations khp_trigger_kernelds_fops = {
+	.write = khp_trigger_kernelds_write
+};
+
 static void __init khp_debugfs_init(void)
 {
 	struct dentry *debugfs_dir = debugfs_create_dir("khp", NULL);
 	debugfs_create_file_size("stats", 0400, debugfs_dir, NULL,
 				 &khp_stats_fops, 0);
 	debugfs_create_file("dump", 0400, debugfs_dir, NULL, &khp_dump_fops);
+	debugfs_create_file("trigger-crash", 0200, debugfs_dir, NULL,
+			    &khp_trigger_crash_fops);
+	debugfs_create_file("trigger-kernelds", 0200, debugfs_dir, NULL,
+			    &khp_trigger_kernelds_fops);
 }
 fs_initcall(khp_debugfs_init);
