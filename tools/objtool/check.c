@@ -511,6 +511,10 @@ static const char *uaccess_safe_builtin[] = {
 	"mcsafe_handle_tail",
 	"ftrace_likely_update", /* CONFIG_TRACE_BRANCH_PROFILING */
 	"__khp_decode_ptr",
+	"__khp_load_1",
+	"__khp_load_2",
+	"__khp_load_4",
+	"__khp_load_8",
 	NULL
 };
 

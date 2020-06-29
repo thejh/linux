@@ -187,3 +187,99 @@ SYM_INNER_LABEL(khp_meta_not_present_fixup, SYM_L_GLOBAL)
 	ret
 SYM_FUNC_END(__khp_decode_ptr)
 _ASM_NOKPROBE(__khp_decode_ptr)
+
+
+
+/*
+ * Fastpath for loading a value from a (potentially) encoded pointer.
+ *
+ * This function adheres to the `preserve_most` calling convention of clang,
+ * which means that it can only use the following registers without spilling to
+ * the stack:
+ *  - rdi: encoded pointer (readonly!)
+ *  - rax: return value, can be used as scratch before
+ *  - r11: scratch via calling convention
+ *
+ * You really should not be calling this with pointers to userspace; but we will
+ * nonetheless try to handle them in a vaguely reasonable way (read: crash).
+ */
+.macro gen_khp_load name movinsn outputreg
+SYM_FUNC_START(\name)
+	/* as in __khp_decode_ptr */
+	mov %rdi, %rax
+	shr $32, %rax
+	cmp $0x40000000, %eax
+	js 1f
+
+	/*
+	 * Load a pointer to the metadata region. The following instruction will
+	 * be patched at boottime (in arch_khp_init()), before any KHP pointers
+	 * exist on the system.
+	 */
+SYM_INNER_LABEL(\name\()_movabs_shifted, SYM_L_GLOBAL)
+	movabs $0x0123456789abcdef, %r11
+
+	/* Construct a pointer to our metadata in r11. */
+	shl $4, %rax
+	add %rax, %r11
+
+	movzwl %di, %eax /* encoded pointer's offset is part of raw pointer */
+	/*
+	 * Load the raw pointer, and add the offset to it.
+	 * This will crash if RDI is a userspace pointer, and potentially also
+	 * if RDI is a fat pointer referring to an index that has not been
+	 * allocated yet.
+	 */
+	add khp_raw_ptr_offset(%r11), %rax
+	/*
+	 * Assign rax/eax/ax/al = raw value, ready for function return.
+	 * This may be a use-after-free load; however, in that case, the
+	 * following cookie check will fail, so everything is fine.
+	 * (If we did things the other way around, it would be racy.)
+	 */
+	\movinsn (%rax), \outputreg
+
+	/*
+	 * Verify cookie and extag, away from the critical path, using only r11
+	 * (touching any other register here is forbidden).
+	 * Test for:
+	 * (encoded_pointer ^ meta->khp_second_half) & 0xFF000000FFFF0000 == 0
+	 *                                               ^^      ^^^^
+	 *                                               |       cookie
+	 *                                               |
+	 *                                               extag
+	 *
+	 * Note that using a single load on meta->khp_second_half also means
+	 * that we do not have to worry about consistency issues between the
+	 * cookie and the extag.
+	 */
+	movq khp_second_half_offset(%r11), %r11
+	xor %rdi, %r11
+	test $0xffff0000, %r11d
+	jnz 2f
+	shr $56, %r11
+	jnz 2f
+
+	ret
+
+/* Raw kernel pointer: Just do a normal load. */
+1:
+	\movinsn (%rdi), \outputreg
+	ret
+
+/*
+ * Pointer decoding failed. Unlike in __khp_decode_ptr(), that is a hard error
+ * here. Trigger a GPF, just like what would have happened when dereferencing
+ * __khp_decode_ptr() output.
+ */
+2:
+	\movinsn (%rdi), \outputreg /* will raise GP */
+	ud2 /* should be unreachable */
+SYM_FUNC_END(\name)
+_ASM_NOKPROBE(\name)
+.endm
+
+gen_khp_load __khp_load_1 movzbl %eax
+gen_khp_load __khp_load_2 movzwl %eax
+gen_khp_load __khp_load_4 movl %eax
+gen_khp_load __khp_load_8 movq %rax

@@ -154,7 +154,11 @@ struct khp_movabs {
 	struct khp_meta *value;
 } __packed;
 
-extern struct khp_movabs khp_region_start_movabs_shifted;
+extern struct khp_movabs khp_region_start_movabs_shifted,
+			 __khp_load_1_movabs_shifted,
+			 __khp_load_2_movabs_shifted,
+			 __khp_load_4_movabs_shifted,
+			 __khp_load_8_movabs_shifted;
 
 void __init arch_khp_init(void)
 {
@@ -170,6 +174,14 @@ void __init arch_khp_init(void)
 
 	text_poke_early(&khp_region_start_movabs_shifted,
 			&movabs_region_shifted, sizeof(movabs_region_shifted));
+	text_poke_early(&__khp_load_1_movabs_shifted, &movabs_region_shifted,
+			sizeof(movabs_region_shifted));
+	text_poke_early(&__khp_load_2_movabs_shifted, &movabs_region_shifted,
+			sizeof(movabs_region_shifted));
+	text_poke_early(&__khp_load_4_movabs_shifted, &movabs_region_shifted,
+			sizeof(movabs_region_shifted));
+	text_poke_early(&__khp_load_8_movabs_shifted, &movabs_region_shifted,
+			sizeof(movabs_region_shifted));
 }
 
 void khp_non_canonical_hook(unsigned long addr)

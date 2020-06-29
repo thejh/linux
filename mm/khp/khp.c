@@ -464,7 +464,12 @@ static void __init khp_populate_toplevel(void)
 void __init khp_init(void)
 {
 	/* TODO randomize */
-	unsigned long khp_region_addr = KHP_BASE_ADDR + 0x1000UL;
+	/*
+	 * Add enough padding on the left to help __khp_load_N crash reliably
+	 * when fed userspace pointers.
+	 */
+	unsigned long khp_region_addr = KHP_BASE_ADDR + 0x1000UL +
+					0x100000000UL * sizeof(struct khp_meta);
 
 	/* TODO using arch random from generic code */
 	khp_cookie_depleted_low =
