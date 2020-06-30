@@ -63,16 +63,42 @@ static void khp_dump_task_stack(struct task_struct *task)
 	pr_emerg("SECOND UNWIND FULLY DONE\n");
 }
 
+static int khp_noscan = 0;
+#ifdef CONFIG_KHP_DEBUG
+static int __init khp_noscan_setup(char *str)
+{
+	khp_noscan = 1;
+	return 0;
+}
+early_param("nokhpscan", khp_noscan_setup);
+#endif
+
 /*
  * @direction is either +1 (for adding refcounts) or -1 (for removing refcounts)
  */
 void khp_stack_scan(struct task_struct *task, int direction) {
-	struct khp_pins_frame *pin_frame = task->thread.khp_pin_head;
-	struct khp_meta *orig_start = khp_orig_region.start;
-	struct khp_meta *orig_end = READ_ONCE(khp_orig_region.used_end);
-	struct khp_meta *fb_start = khp_fallback_region.start;
-	struct khp_meta *fb_end = READ_ONCE(khp_fallback_region.used_end);
-	bool migrated = test_bit(KHP_MIGRATED_BIT, &task->khp_flags);
+	struct khp_pins_frame *pin_frame;
+	struct khp_meta *orig_start;
+	struct khp_meta *orig_end;
+	struct khp_meta *fb_start;
+	struct khp_meta *fb_end;
+	bool migrated;
+
+	/*
+	 * For debugging:
+	 * Allow measuring the overhead of KHP without stack scanning.
+	 * This is useful because stack scanning can potentially be reduced at
+	 * the cost of delaying local freeing a bit more.
+	 */
+	if (khp_noscan)
+		return;
+
+	pin_frame = task->thread.khp_pin_head;
+	orig_start = khp_orig_region.start;
+	orig_end = READ_ONCE(khp_orig_region.used_end);
+	fb_start = khp_fallback_region.start;
+	fb_end = READ_ONCE(khp_fallback_region.used_end);
+	migrated = test_bit(KHP_MIGRATED_BIT, &task->khp_flags);
 
 	/*
 	 * Note: KHP_MIGRATED_BIT can be set on direction +1 if we failed the
