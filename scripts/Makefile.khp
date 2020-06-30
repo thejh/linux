@@ -1,6 +1,10 @@
-ifdef CONFIG_KHP
+ifdef CONFIG_KHP_PUREINST
 
+ifdef CONFIG_KHP
 CFLAGS_KHP := -fsanitize=kernel -D__KHP_INSTRUMENT__
+else
+CFLAGS_KHP := -fsanitize=kernel
+endif
 
 ifeq ($(call cc-option, $(CFLAGS_KHP) -Werror),)
    ifneq ($(CONFIG_COMPILE_TEST),y)

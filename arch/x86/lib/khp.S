@@ -20,6 +20,7 @@
  *  - r11: scratch via calling convention
  */
 SYM_FUNC_START(__khp_decode_ptr)
+#ifdef CONFIG_KHP
 	/* Make sure we are not dealing with an unencoded pointer. */
 	mov %rdi, %rax
 	shr $32, %rax
@@ -109,10 +110,12 @@ SYM_INNER_LABEL(khp_first_metadata_access, SYM_L_GLOBAL)
 
 
 .Lunencoded_pointer:
+#endif
 	movq %rdi, %rax
 	ret
 
 
+#ifdef CONFIG_KHP
 .Lnonlocal_slowpath:
 #ifdef CONFIG_KHP_DEBUG
 	pushf
@@ -185,6 +188,7 @@ SYM_INNER_LABEL(khp_meta_not_present_fixup, SYM_L_GLOBAL)
 .Ldecode_fail:
 	mov %rdi, %rax
 	ret
+#endif
 SYM_FUNC_END(__khp_decode_ptr)
 _ASM_NOKPROBE(__khp_decode_ptr)
 
@@ -205,6 +209,7 @@ _ASM_NOKPROBE(__khp_decode_ptr)
  */
 .macro gen_khp_load name movinsn outputreg
 SYM_FUNC_START(\name)
+#ifdef CONFIG_KHP
 	/* as in __khp_decode_ptr */
 	mov %rdi, %rax
 	shr $32, %rax
@@ -264,9 +269,11 @@ SYM_INNER_LABEL(\name\()_movabs_shifted, SYM_L_GLOBAL)
 
 /* Raw kernel pointer: Just do a normal load. */
 1:
+#endif
 	\movinsn (%rdi), \outputreg
 	ret
 
+#ifdef CONFIG_KHP
 /*
  * Pointer decoding failed. Unlike in __khp_decode_ptr(), that is a hard error
  * here. Trigger a GPF, just like what would have happened when dereferencing
@@ -277,6 +284,7 @@ SYM_INNER_LABEL(\name\()_movabs_shifted, SYM_L_GLOBAL)
 	ud2 /* should be unreachable */
 SYM_FUNC_END(\name)
 _ASM_NOKPROBE(\name)
+#endif
 .endm
 
 gen_khp_load __khp_load_1 movzbl %eax

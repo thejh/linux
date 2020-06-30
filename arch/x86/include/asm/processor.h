@@ -547,7 +547,7 @@ struct thread_struct {
 
 	unsigned int		sig_on_uaccess_err:1;
 
-#ifdef CONFIG_KHP
+#ifdef CONFIG_KHP_PUREINST
 	struct khp_pins_frame	*khp_pin_head;
 #endif
 

@@ -3,9 +3,17 @@ config HAVE_ARCH_KHP
 
 if HAVE_ARCH_KHP
 
+config KHP_PUREINST
+  bool "KHP: kernel heap protector (pure instrumentation)"
+  depends on !KASAN
+  help
+    Enables basic kernel heap protector infrastructure.
+    This has no effect other than slowing down your kernel unless you also
+    enable CONFIG_KHP.
+
 config KHP
   bool "KHP: kernel heap protector"
-  depends on SLUB && !KASAN
+  depends on KHP_PUREINST && SLUB
   select RANDOMIZE_BASE
   select CONTEXT_TRACKING
   select CONTEXT_TRACKING_FORCE

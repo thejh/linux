@@ -82,6 +82,8 @@ int main(void)
 	DEFINE(TASK_khp_recursion, offsetof(struct task_struct, khp_recursion));
 #endif
 	BLANK();
+#endif
+#ifdef CONFIG_KHP_PUREINST
 	/* fixed_percpu_data */
 	DEFINE(khp_pcpu_pin_head_offset, offsetof(struct fixed_percpu_data, khp_pcpu_pin_head));
 	BLANK();

@@ -300,7 +300,7 @@ SYM_FUNC_START(__switch_to_asm)
 	movq	%rbx, PER_CPU_VAR(fixed_percpu_data) + stack_canary_offset
 #endif
 
-#ifdef CONFIG_KHP
+#ifdef CONFIG_KHP_PUREINST
 	movq PER_CPU_VAR(fixed_percpu_data) + khp_pcpu_pin_head_offset, %rbx
 	movq khp_task_pin_head_offset(%rsi), %r12
 	movq %r12, PER_CPU_VAR(fixed_percpu_data) + khp_pcpu_pin_head_offset
@@ -1744,7 +1744,7 @@ SYM_CODE_START(rewind_stack_do_exit)
 	/* Prevent any naive code from trying to unwind to our caller. */
 	xorl	%ebp, %ebp
 
-#ifdef CONFIG_KHP
+#ifdef CONFIG_KHP_PUREINST
 	movq $0, PER_CPU_VAR(fixed_percpu_data) + khp_pcpu_pin_head_offset
 #endif
 
