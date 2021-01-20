@@ -365,6 +365,36 @@ static inline struct slub_list_head read_page_list(struct page *page)
 	return head;
 }
 
+#define SLUB_HEAD_EMPTY ((slub_head_ptr_t) { .val = NULL })
+
+/*
+ * Decode the page freelist head @head, which is part of the same slab page as
+ * @base (or NULL).
+ */
+static inline void *decode_head_fast(void *base, slub_head_ptr_t head)
+{
+	return head.val;
+}
+
+/*
+ * Decode the page freelist head @head, which points into @page's memory (or is
+ * NULL).
+ */
+static inline void *decode_head(struct page *page, slub_head_ptr_t head)
+{
+	return head.val;
+}
+
+static inline slub_head_ptr_t encode_head(void *head)
+{
+	return (slub_head_ptr_t) { .val = head };
+}
+
+static inline bool head_empty(slub_head_ptr_t head)
+{
+	return head.val == NULL;
+}
+
 /* Interrupts must be disabled (for the fallback code to work right) */
 static inline bool __cmpxchg_double_slab(struct kmem_cache *s, struct page *page,
 		struct slub_list_head old, struct slub_list_head new,
@@ -384,7 +414,7 @@ static inline bool __cmpxchg_double_slab(struct kmem_cache *s, struct page *page
 #endif
 	{
 		slab_lock(page);
-		if (head->freelist == old.freelist &&
+		if (head->freelist.val == old.freelist.val &&
 					head->counters == old.counters) {
 			*head = new;
 			slab_unlock(page);
@@ -423,7 +453,7 @@ static inline bool cmpxchg_double_slab(struct kmem_cache *s, struct page *page,
 
 		local_irq_save(flags);
 		slab_lock(page);
-		if (head->freelist == old.freelist &&
+		if (head->freelist.val == old.freelist.val &&
 					head->counters == old.counters) {
 			*head = new;
 			slab_unlock(page);
@@ -466,7 +496,8 @@ static unsigned long *get_map(struct kmem_cache *s, struct page *page)
 
 	bitmap_zero(object_map, page->slub_head.objects);
 
-	for (p = page->slub_head.freelist; p; p = get_freepointer(s, p))
+	for (p = decode_head(page, page->slub_head.freelist); p;
+			p = get_freepointer(s, p))
 		set_bit(__obj_to_index(s, addr, p), object_map);
 
 	return object_map;
@@ -655,7 +686,8 @@ static void print_page_info(struct page *page)
 	struct slub_list_head *head = &page->slub_head;
 
 	pr_err("INFO: Slab 0x%p objects=%u used=%u fp=0x%p flags=0x%04lx\n",
-	       page, head->objects, head->inuse, head->freelist, page->flags);
+	       page, head->objects, head->inuse,
+	       decode_head(page, head->freelist), page->flags);
 
 }
 
@@ -1000,7 +1032,7 @@ static int on_freelist(struct kmem_cache *s, struct page *page, void *search)
 	int max_objects;
 	struct slub_list_head *head = &page->slub_head;
 
-	fp = head->freelist;
+	fp = decode_head(page, head->freelist);
 	while (fp && nr <= head->objects) {
 		if (fp == search)
 			return 1;
@@ -1011,7 +1043,7 @@ static int on_freelist(struct kmem_cache *s, struct page *page, void *search)
 				set_freepointer(s, object, NULL);
 			} else {
 				slab_err(s, page, "Freepointer corrupt");
-				head->freelist = NULL;
+				head->freelist = SLUB_HEAD_EMPTY;
 				head->inuse = head->objects;
 				slab_fix(s, "Freelist cleared");
 				return 0;
@@ -1050,7 +1082,7 @@ static void trace(struct kmem_cache *s, struct page *page, void *object,
 			s->name,
 			alloc ? "alloc" : "free",
 			object, page->slub_head.inuse,
-			page->slub_head.freelist);
+			decode_head(page, page->slub_head.freelist));
 
 		if (!alloc)
 			print_section(KERN_INFO, "Object ", (void *)object,
@@ -1182,7 +1214,7 @@ bad:
 		 */
 		slab_fix(s, "Marking all objects used");
 		page->slub_head.inuse = page->slub_head.objects;
-		page->slub_head.freelist = NULL;
+		page->slub_head.freelist = SLUB_HEAD_EMPTY;
 	}
 	return 0;
 }
@@ -1722,7 +1754,7 @@ static bool shuffle_freelist(struct kmem_cache *s, struct page *page)
 	cur = next_freelist_entry(s, page, &pos, start, page_limit,
 				freelist_count);
 	cur = setup_object(s, page, cur);
-	head->freelist = cur;
+	head->freelist = encode_head(cur);
 
 	for (idx = 1; idx < head->objects; idx++) {
 		next = next_freelist_entry(s, page, &pos, start, page_limit,
@@ -1807,7 +1839,7 @@ static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 	if (!shuffle) {
 		start = fixup_red_left(s, start);
 		start = setup_object(s, page, start);
-		page->slub_head.freelist = start;
+		page->slub_head.freelist = encode_head(start);
 		for (idx = 0, p = start; idx < head->objects - 1; idx++) {
 			next = p + s->size;
 			next = setup_object(s, page, next);
@@ -1938,7 +1970,7 @@ static inline void *acquire_slab(struct kmem_cache *s,
 	*objects = new.objects - new.inuse;
 	if (mode) {
 		new.inuse = old.objects;
-		new.freelist = NULL;
+		new.freelist = SLUB_HEAD_EMPTY;
 	} else {
 		new.freelist = old.freelist;
 	}
@@ -1950,8 +1982,8 @@ static inline void *acquire_slab(struct kmem_cache *s,
 		return NULL;
 
 	remove_partial(n, page);
-	WARN_ON(!old.freelist);
-	return old.freelist;
+	WARN_ON(head_empty(old.freelist));
+	return decode_head(page, old.freelist);
 }
 
 static void put_cpu_partial(struct kmem_cache *s, struct page *page, int drain);
@@ -2173,7 +2205,7 @@ static void deactivate_slab(struct kmem_cache *s, struct page *page,
 	struct slub_list_head new;
 	struct slub_list_head old;
 
-	if (page->slub_head.freelist) {
+	if (!head_empty(page->slub_head.freelist)) {
 		stat(s, DEACTIVATE_REMOTE_FREES);
 		tail = DEACTIVATE_TO_TAIL;
 	}
@@ -2226,8 +2258,9 @@ redo:
 	new.counters = old.counters;
 	if (freelist_tail) {
 		new.inuse -= free_delta;
-		set_freepointer(s, freelist_tail, old.freelist);
-		new.freelist = freelist;
+		set_freepointer(s, freelist_tail,
+				decode_head_fast(freelist_tail, old.freelist));
+		new.freelist = encode_head(freelist);
 	} else
 		new.freelist = old.freelist;
 
@@ -2235,7 +2268,7 @@ redo:
 
 	if (!new.inuse && n->nr_partial >= s->min_partial)
 		m = M_FREE;
-	else if (new.freelist) {
+	else if (!head_empty(new.freelist)) {
 		m = M_PARTIAL;
 		if (!lock) {
 			lock = 1;
@@ -2580,8 +2613,8 @@ static inline void *new_slab_objects(struct kmem_cache *s, gfp_t flags,
 		 * No other reference to the page yet so we can
 		 * muck around with it freely without cmpxchg
 		 */
-		freelist = page->slub_head.freelist;
-		page->slub_head.freelist = NULL;
+		freelist = decode_head(page, page->slub_head.freelist);
+		page->slub_head.freelist = SLUB_HEAD_EMPTY;
 
 		stat(s, ALLOC_SLAB);
 		c->page = page;
@@ -2620,12 +2653,12 @@ static inline void *get_freelist(struct kmem_cache *s, struct page *page)
 
 		new.counters = old.counters;
 		new.inuse = old.objects;
-		new.frozen = old.freelist != NULL;
-		new.freelist = NULL;
+		new.frozen = !head_empty(old.freelist);
+		new.freelist = SLUB_HEAD_EMPTY;
 
 	} while (!__cmpxchg_double_slab(s, page, old, new, "get_freelist"));
 
-	return old.freelist;
+	return decode_head(page, old.freelist);
 }
 
 /*
@@ -2964,19 +2997,20 @@ static void __slab_free(struct kmem_cache *s, struct page *page,
 	    !free_debug_processing(s, page, head, tail, cnt, addr))
 		return;
 
-	new.freelist = head;
+	new.freelist = encode_head(head);
 	do {
 		if (unlikely(n)) {
 			spin_unlock_irqrestore(&n->list_lock, flags);
 			n = NULL;
 		}
 		old = read_page_list(page);
-		set_freepointer(s, tail, old.freelist);
+		set_freepointer(s, tail, decode_head_fast(head, old.freelist));
 		new.counters = old.counters;
 		new.inuse -= cnt;
-		if ((!new.inuse || !old.freelist) && !old.frozen) {
+		if ((!new.inuse || head_empty(old.freelist)) && !old.frozen) {
 
-			if (kmem_cache_has_cpu_partial(s) && !old.freelist) {
+			if (kmem_cache_has_cpu_partial(s) &&
+					head_empty(old.freelist)) {
 
 				/*
 				 * Slab was on no list before and will be
@@ -3031,7 +3065,8 @@ static void __slab_free(struct kmem_cache *s, struct page *page,
 	 * Objects left in the slab. If it was not on the partial list before
 	 * then add it.
 	 */
-	if (!kmem_cache_has_cpu_partial(s) && unlikely(!old.freelist)) {
+	if (!kmem_cache_has_cpu_partial(s) &&
+			unlikely(head_empty(old.freelist))) {
 		remove_full(s, n, page);
 		add_partial(n, page, DEACTIVATE_TO_TAIL);
 		stat(s, FREE_ADD_PARTIAL);
@@ -3040,7 +3075,7 @@ static void __slab_free(struct kmem_cache *s, struct page *page,
 	return;
 
 slab_empty:
-	if (old.freelist) {
+	if (!head_empty(old.freelist)) {
 		/*
 		 * Slab on the partial list.
 		 */
@@ -3511,7 +3546,7 @@ static void early_kmem_cache_node_alloc(int node)
 		pr_err("SLUB: Allocating a useless per node structure in order to be able to continue\n");
 	}
 
-	n = page->slub_head.freelist;
+	n = decode_head(page, page->slub_head.freelist);
 	BUG_ON(!n);
 #ifdef CONFIG_SLUB_DEBUG
 	init_object(kmem_cache_node, n, SLUB_RED_ACTIVE);
@@ -3519,7 +3554,8 @@ static void early_kmem_cache_node_alloc(int node)
 #endif
 	n = kasan_kmalloc(kmem_cache_node, n, sizeof(struct kmem_cache_node),
 		      GFP_KERNEL);
-	page->slub_head.freelist = get_freepointer(kmem_cache_node, n);
+	page->slub_head.freelist =
+			encode_head(get_freepointer(kmem_cache_node, n));
 	page->slub_head.inuse = 1;
 	page->slub_head.frozen = 0;
 	kmem_cache_node->node[node] = n;

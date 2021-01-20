@@ -67,8 +67,11 @@ struct mem_cgroup;
 #endif
 
 #ifdef CONFIG_SLUB
+typedef struct {
+	void *val;
+} slub_head_ptr_t;
 struct slub_list_head {
-	void *freelist;
+	slub_head_ptr_t freelist;
 	union {
 		unsigned long counters;
 		struct {
