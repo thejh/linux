@@ -66,6 +66,20 @@ struct mem_cgroup;
 #define _struct_page_alignment
 #endif
 
+#ifdef CONFIG_SLUB
+struct slub_list_head {
+	void *freelist;
+	union {
+		unsigned long counters;
+		struct {
+			unsigned inuse:16;
+			unsigned objects:15;
+			unsigned frozen:1;
+		};
+	};
+};
+#endif
+
 struct page {
 	unsigned long flags;		/* Atomic flags, some possibly
 					 * updated asynchronously */
@@ -117,16 +131,16 @@ struct page {
 			};
 			struct kmem_cache *slab_cache; /* not slob */
 			/* Double-word boundary */
+#ifdef CONFIG_SLOB
 			void *freelist;		/* first free object */
-			union {
-				void *s_mem;	/* slab: first object */
-				unsigned long counters;		/* SLUB */
-				struct {			/* SLUB */
-					unsigned inuse:16;
-					unsigned objects:15;
-					unsigned frozen:1;
-				};
-			};
+#endif
+#ifdef CONFIG_SLAB
+			void *freelist;		/* first free object */
+			void *s_mem;	/* first object */
+#endif
+#ifdef CONFIG_SLUB
+			struct slub_list_head slub_head;
+#endif
 		};
 		struct {	/* Tail pages of compound page */
 			unsigned long compound_head;	/* Bit zero is set */

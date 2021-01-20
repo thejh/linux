@@ -355,28 +355,38 @@ static __always_inline void slab_unlock(struct page *page)
 	__bit_spin_unlock(PG_locked, &page->flags);
 }
 
+/* returned freelist and counters may not be coherent */
+static inline struct slub_list_head read_page_list(struct page *page)
+{
+	struct slub_list_head head = {
+		.freelist = READ_ONCE(page->slub_head.freelist),
+		.counters = READ_ONCE(page->slub_head.counters)
+	};
+	return head;
+}
+
 /* Interrupts must be disabled (for the fallback code to work right) */
 static inline bool __cmpxchg_double_slab(struct kmem_cache *s, struct page *page,
-		void *freelist_old, unsigned long counters_old,
-		void *freelist_new, unsigned long counters_new,
+		struct slub_list_head old, struct slub_list_head new,
 		const char *n)
 {
+	struct slub_list_head *head = &page->slub_head;
+
 	VM_BUG_ON(!irqs_disabled());
 #if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
     defined(CONFIG_HAVE_ALIGNED_STRUCT_PAGE)
 	if (s->flags & __CMPXCHG_DOUBLE) {
-		if (cmpxchg_double(&page->freelist, &page->counters,
-				   freelist_old, counters_old,
-				   freelist_new, counters_new))
+		if (cmpxchg_double(&head->freelist, &head->counters,
+				   old.freelist, old.counters,
+				   new.freelist, new.counters))
 			return true;
 	} else
 #endif
 	{
 		slab_lock(page);
-		if (page->freelist == freelist_old &&
-					page->counters == counters_old) {
-			page->freelist = freelist_new;
-			page->counters = counters_new;
+		if (head->freelist == old.freelist &&
+					head->counters == old.counters) {
+			*head = new;
 			slab_unlock(page);
 			return true;
 		}
@@ -394,16 +404,17 @@ static inline bool __cmpxchg_double_slab(struct kmem_cache *s, struct page *page
 }
 
 static inline bool cmpxchg_double_slab(struct kmem_cache *s, struct page *page,
-		void *freelist_old, unsigned long counters_old,
-		void *freelist_new, unsigned long counters_new,
+		struct slub_list_head old, struct slub_list_head new,
 		const char *n)
 {
+	struct slub_list_head *head = &page->slub_head;
+
 #if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
     defined(CONFIG_HAVE_ALIGNED_STRUCT_PAGE)
 	if (s->flags & __CMPXCHG_DOUBLE) {
-		if (cmpxchg_double(&page->freelist, &page->counters,
-				   freelist_old, counters_old,
-				   freelist_new, counters_new))
+		if (cmpxchg_double(&head->freelist, &head->counters,
+				   old.freelist, old.counters,
+				   new.freelist, new.counters))
 			return true;
 	} else
 #endif
@@ -412,10 +423,9 @@ static inline bool cmpxchg_double_slab(struct kmem_cache *s, struct page *page,
 
 		local_irq_save(flags);
 		slab_lock(page);
-		if (page->freelist == freelist_old &&
-					page->counters == counters_old) {
-			page->freelist = freelist_new;
-			page->counters = counters_new;
+		if (head->freelist == old.freelist &&
+					head->counters == old.counters) {
+			*head = new;
 			slab_unlock(page);
 			local_irq_restore(flags);
 			return true;
@@ -454,9 +464,9 @@ static unsigned long *get_map(struct kmem_cache *s, struct page *page)
 
 	spin_lock(&object_map_lock);
 
-	bitmap_zero(object_map, page->objects);
+	bitmap_zero(object_map, page->slub_head.objects);
 
-	for (p = page->freelist; p; p = get_freepointer(s, p))
+	for (p = page->slub_head.freelist; p; p = get_freepointer(s, p))
 		set_bit(__obj_to_index(s, addr, p), object_map);
 
 	return object_map;
@@ -528,7 +538,8 @@ static inline int check_valid_pointer(struct kmem_cache *s,
 	base = page_address(page);
 	object = kasan_reset_tag(object);
 	object = restore_red_left(s, object);
-	if (object < base || object >= base + page->objects * s->size ||
+	if (object < base ||
+		object >= base + page->slub_head.objects * s->size ||
 		(object - base) % s->size) {
 		return 0;
 	}
@@ -641,8 +652,10 @@ void print_tracking(struct kmem_cache *s, void *object)
 
 static void print_page_info(struct page *page)
 {
+	struct slub_list_head *head = &page->slub_head;
+
 	pr_err("INFO: Slab 0x%p objects=%u used=%u fp=0x%p flags=0x%04lx\n",
-	       page, page->objects, page->inuse, page->freelist, page->flags);
+	       page, head->objects, head->inuse, head->freelist, page->flags);
 
 }
 
@@ -950,6 +963,7 @@ static int check_object(struct kmem_cache *s, struct page *page,
 static int check_slab(struct kmem_cache *s, struct page *page)
 {
 	int maxobj;
+	int objects;
 
 	VM_BUG_ON(!irqs_disabled());
 
@@ -958,15 +972,15 @@ static int check_slab(struct kmem_cache *s, struct page *page)
 		return 0;
 	}
 
+	objects = page->slub_head.objects;
 	maxobj = order_objects(compound_order(page), s->size);
-	if (page->objects > maxobj) {
-		slab_err(s, page, "objects %u > max %u",
-			page->objects, maxobj);
+	if (objects > maxobj) {
+		slab_err(s, page, "objects %u > max %u", objects, maxobj);
 		return 0;
 	}
-	if (page->inuse > page->objects) {
-		slab_err(s, page, "inuse %u > max %u",
-			page->inuse, page->objects);
+	if (page->slub_head.inuse > page->slub_head.objects) {
+		slab_err(s, page, "inuse %u > max %u", page->slub_head.inuse,
+			 objects);
 		return 0;
 	}
 	/* Slab_pad_check fixes things up after itself */
@@ -984,9 +998,10 @@ static int on_freelist(struct kmem_cache *s, struct page *page, void *search)
 	void *fp;
 	void *object = NULL;
 	int max_objects;
+	struct slub_list_head *head = &page->slub_head;
 
-	fp = page->freelist;
-	while (fp && nr <= page->objects) {
+	fp = head->freelist;
+	while (fp && nr <= head->objects) {
 		if (fp == search)
 			return 1;
 		if (!check_valid_pointer(s, page, fp)) {
@@ -996,8 +1011,8 @@ static int on_freelist(struct kmem_cache *s, struct page *page, void *search)
 				set_freepointer(s, object, NULL);
 			} else {
 				slab_err(s, page, "Freepointer corrupt");
-				page->freelist = NULL;
-				page->inuse = page->objects;
+				head->freelist = NULL;
+				head->inuse = head->objects;
 				slab_fix(s, "Freelist cleared");
 				return 0;
 			}
@@ -1012,16 +1027,16 @@ static int on_freelist(struct kmem_cache *s, struct page *page, void *search)
 	if (max_objects > MAX_OBJS_PER_PAGE)
 		max_objects = MAX_OBJS_PER_PAGE;
 
-	if (page->objects != max_objects) {
+	if (head->objects != max_objects) {
 		slab_err(s, page, "Wrong number of objects. Found %d but should be %d",
-			 page->objects, max_objects);
-		page->objects = max_objects;
+			 head->objects, max_objects);
+		head->objects = max_objects;
 		slab_fix(s, "Number of objects adjusted.");
 	}
-	if (page->inuse != page->objects - nr) {
+	if (head->inuse != head->objects - nr) {
 		slab_err(s, page, "Wrong object count. Counter is %d but counted were %d",
-			 page->inuse, page->objects - nr);
-		page->inuse = page->objects - nr;
+			 head->inuse, head->objects - nr);
+		head->inuse = head->objects - nr;
 		slab_fix(s, "Object count adjusted.");
 	}
 	return search == NULL;
@@ -1034,8 +1049,8 @@ static void trace(struct kmem_cache *s, struct page *page, void *object,
 		pr_info("TRACE %s %s 0x%p inuse=%d fp=0x%p\n",
 			s->name,
 			alloc ? "alloc" : "free",
-			object, page->inuse,
-			page->freelist);
+			object, page->slub_head.inuse,
+			page->slub_head.freelist);
 
 		if (!alloc)
 			print_section(KERN_INFO, "Object ", (void *)object,
@@ -1166,8 +1181,8 @@ bad:
 		 * as used avoids touching the remaining objects.
 		 */
 		slab_fix(s, "Marking all objects used");
-		page->inuse = page->objects;
-		page->freelist = NULL;
+		page->slub_head.inuse = page->slub_head.objects;
+		page->slub_head.freelist = NULL;
 	}
 	return 0;
 }
@@ -1692,23 +1707,24 @@ static bool shuffle_freelist(struct kmem_cache *s, struct page *page)
 	void *cur;
 	void *next;
 	unsigned long idx, pos, page_limit, freelist_count;
+	struct slub_list_head *head = &page->slub_head;
 
-	if (page->objects < 2 || !s->random_seq)
+	if (head->objects < 2 || !s->random_seq)
 		return false;
 
 	freelist_count = oo_objects(s->oo);
 	pos = get_random_int() % freelist_count;
 
-	page_limit = page->objects * s->size;
+	page_limit = head->objects * s->size;
 	start = fixup_red_left(s, page_address(page));
 
 	/* First entry is used as the base of the freelist */
 	cur = next_freelist_entry(s, page, &pos, start, page_limit,
 				freelist_count);
 	cur = setup_object(s, page, cur);
-	page->freelist = cur;
+	head->freelist = cur;
 
-	for (idx = 1; idx < page->objects; idx++) {
+	for (idx = 1; idx < head->objects; idx++) {
 		next = next_freelist_entry(s, page, &pos, start, page_limit,
 			freelist_count);
 		next = setup_object(s, page, next);
@@ -1734,6 +1750,7 @@ static inline bool shuffle_freelist(struct kmem_cache *s, struct page *page)
 static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 {
 	struct page *page;
+	struct slub_list_head *head;
 	struct kmem_cache_order_objects oo = s->oo;
 	gfp_t alloc_gfp;
 	void *start, *p, *next;
@@ -1769,7 +1786,8 @@ static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 		stat(s, ORDER_FALLBACK);
 	}
 
-	page->objects = oo_objects(oo);
+	head = &page->slub_head;
+	head->objects = oo_objects(oo);
 
 	account_slab_page(page, oo_order(oo), s);
 
@@ -1789,8 +1807,8 @@ static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 	if (!shuffle) {
 		start = fixup_red_left(s, start);
 		start = setup_object(s, page, start);
-		page->freelist = start;
-		for (idx = 0, p = start; idx < page->objects - 1; idx++) {
+		page->slub_head.freelist = start;
+		for (idx = 0, p = start; idx < head->objects - 1; idx++) {
 			next = p + s->size;
 			next = setup_object(s, page, next);
 			set_freepointer(s, p, next);
@@ -1799,8 +1817,8 @@ static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 		set_freepointer(s, p, NULL);
 	}
 
-	page->inuse = page->objects;
-	page->frozen = 1;
+	head->inuse = head->objects;
+	head->frozen = 1;
 
 out:
 	if (gfpflags_allow_blocking(flags))
@@ -1808,7 +1826,7 @@ out:
 	if (!page)
 		return NULL;
 
-	inc_slabs_node(s, page_to_nid(page), page->objects);
+	inc_slabs_node(s, page_to_nid(page), head->objects);
 
 	return page;
 }
@@ -1832,7 +1850,7 @@ static void __free_slab(struct kmem_cache *s, struct page *page)
 
 		slab_pad_check(s, page);
 		for_each_object(p, s, page_address(page),
-						page->objects)
+						page->slub_head.objects)
 			check_object(s, page, p, SLUB_RED_INACTIVE);
 	}
 
@@ -1863,7 +1881,7 @@ static void free_slab(struct kmem_cache *s, struct page *page)
 
 static void discard_slab(struct kmem_cache *s, struct page *page)
 {
-	dec_slabs_node(s, page_to_nid(page), page->objects);
+	dec_slabs_node(s, page_to_nid(page), page->slub_head.objects);
 	free_slab(s, page);
 }
 
@@ -1905,9 +1923,8 @@ static inline void *acquire_slab(struct kmem_cache *s,
 		struct kmem_cache_node *n, struct page *page,
 		int mode, int *objects)
 {
-	void *freelist;
-	unsigned long counters;
-	struct page new;
+	struct slub_list_head old;
+	struct slub_list_head new;
 
 	lockdep_assert_held(&n->list_lock);
 
@@ -1916,29 +1933,25 @@ static inline void *acquire_slab(struct kmem_cache *s,
 	 * The old freelist is the list of objects for the
 	 * per cpu allocation list.
 	 */
-	freelist = page->freelist;
-	counters = page->counters;
-	new.counters = counters;
+	old = read_page_list(page);
+	new.counters = old.counters;
 	*objects = new.objects - new.inuse;
 	if (mode) {
-		new.inuse = page->objects;
+		new.inuse = old.objects;
 		new.freelist = NULL;
 	} else {
-		new.freelist = freelist;
+		new.freelist = old.freelist;
 	}
 
 	VM_BUG_ON(new.frozen);
 	new.frozen = 1;
 
-	if (!__cmpxchg_double_slab(s, page,
-			freelist, counters,
-			new.freelist, new.counters,
-			"acquire_slab"))
+	if (!__cmpxchg_double_slab(s, page, old, new, "acquire_slab"))
 		return NULL;
 
 	remove_partial(n, page);
-	WARN_ON(!freelist);
-	return freelist;
+	WARN_ON(!old.freelist);
+	return old.freelist;
 }
 
 static void put_cpu_partial(struct kmem_cache *s, struct page *page, int drain);
@@ -2157,10 +2170,10 @@ static void deactivate_slab(struct kmem_cache *s, struct page *page,
 	enum slab_modes l = M_NONE, m = M_NONE;
 	void *nextfree, *freelist_iter, *freelist_tail;
 	int tail = DEACTIVATE_TO_HEAD;
-	struct page new;
-	struct page old;
+	struct slub_list_head new;
+	struct slub_list_head old;
 
-	if (page->freelist) {
+	if (page->slub_head.freelist) {
 		stat(s, DEACTIVATE_REMOTE_FREES);
 		tail = DEACTIVATE_TO_TAIL;
 	}
@@ -2206,8 +2219,7 @@ static void deactivate_slab(struct kmem_cache *s, struct page *page,
 	 */
 redo:
 
-	old.freelist = READ_ONCE(page->freelist);
-	old.counters = READ_ONCE(page->counters);
+	old = read_page_list(page);
 	VM_BUG_ON(!old.frozen);
 
 	/* Determine target state of the slab */
@@ -2260,10 +2272,7 @@ redo:
 	}
 
 	l = m;
-	if (!__cmpxchg_double_slab(s, page,
-				old.freelist, old.counters,
-				new.freelist, new.counters,
-				"unfreezing slab"))
+	if (!__cmpxchg_double_slab(s, page, old, new, "unfreezing slab"))
 		goto redo;
 
 	if (lock)
@@ -2298,8 +2307,8 @@ static void unfreeze_partials(struct kmem_cache *s,
 	struct page *page, *discard_page = NULL;
 
 	while ((page = slub_percpu_partial(c))) {
-		struct page new;
-		struct page old;
+		struct slub_list_head new;
+		struct slub_list_head old;
 
 		slub_set_percpu_partial(c, page);
 
@@ -2314,8 +2323,7 @@ static void unfreeze_partials(struct kmem_cache *s,
 
 		do {
 
-			old.freelist = page->freelist;
-			old.counters = page->counters;
+			old = read_page_list(page);
 			VM_BUG_ON(!old.frozen);
 
 			new.counters = old.counters;
@@ -2323,9 +2331,7 @@ static void unfreeze_partials(struct kmem_cache *s,
 
 			new.frozen = 0;
 
-		} while (!__cmpxchg_double_slab(s, page,
-				old.freelist, old.counters,
-				new.freelist, new.counters,
+		} while (!__cmpxchg_double_slab(s, page, old, new,
 				"unfreezing slab"));
 
 		if (unlikely(!new.inuse && n->nr_partial >= s->min_partial)) {
@@ -2391,7 +2397,7 @@ static void put_cpu_partial(struct kmem_cache *s, struct page *page, int drain)
 		}
 
 		pages++;
-		pobjects += page->objects - page->inuse;
+		pobjects += page->slub_head.objects - page->slub_head.inuse;
 
 		page->pages = pages;
 		page->pobjects = pobjects;
@@ -2488,7 +2494,7 @@ static inline int node_match(struct page *page, int node)
 #ifdef CONFIG_SLUB_DEBUG
 static int count_free(struct page *page)
 {
-	return page->objects - page->inuse;
+	return page->slub_head.objects - page->slub_head.inuse;
 }
 
 static inline unsigned long node_nr_objs(struct kmem_cache_node *n)
@@ -2574,8 +2580,8 @@ static inline void *new_slab_objects(struct kmem_cache *s, gfp_t flags,
 		 * No other reference to the page yet so we can
 		 * muck around with it freely without cmpxchg
 		 */
-		freelist = page->freelist;
-		page->freelist = NULL;
+		freelist = page->slub_head.freelist;
+		page->slub_head.freelist = NULL;
 
 		stat(s, ALLOC_SLAB);
 		c->page = page;
@@ -2605,26 +2611,21 @@ static inline bool pfmemalloc_match(struct page *page, gfp_t gfpflags)
  */
 static inline void *get_freelist(struct kmem_cache *s, struct page *page)
 {
-	struct page new;
-	unsigned long counters;
-	void *freelist;
+	struct slub_list_head new;
+	struct slub_list_head old;
 
 	do {
-		freelist = page->freelist;
-		counters = page->counters;
+		old = read_page_list(page);
+		VM_BUG_ON(!old.frozen);
 
-		new.counters = counters;
-		VM_BUG_ON(!new.frozen);
+		new.counters = old.counters;
+		new.inuse = old.objects;
+		new.frozen = old.freelist != NULL;
+		new.freelist = NULL;
 
-		new.inuse = page->objects;
-		new.frozen = freelist != NULL;
+	} while (!__cmpxchg_double_slab(s, page, old, new, "get_freelist"));
 
-	} while (!__cmpxchg_double_slab(s, page,
-		freelist, counters,
-		NULL, new.counters,
-		"get_freelist"));
-
-	return freelist;
+	return old.freelist;
 }
 
 /*
@@ -2713,7 +2714,7 @@ load_freelist:
 	 * page is pointing to the page from which the objects are obtained.
 	 * That page must be frozen for per cpu allocations to work.
 	 */
-	VM_BUG_ON(!c->page->frozen);
+	VM_BUG_ON(!c->page->slub_head.frozen);
 	c->freelist = get_freepointer(s, freelist);
 	c->tid = next_tid(c->tid);
 	return freelist;
@@ -2952,10 +2953,8 @@ static void __slab_free(struct kmem_cache *s, struct page *page,
 			unsigned long addr)
 
 {
-	void *prior;
-	int was_frozen;
-	struct page new;
-	unsigned long counters;
+	struct slub_list_head new;
+	struct slub_list_head old;
 	struct kmem_cache_node *n = NULL;
 	unsigned long flags;
 
@@ -2965,20 +2964,19 @@ static void __slab_free(struct kmem_cache *s, struct page *page,
 	    !free_debug_processing(s, page, head, tail, cnt, addr))
 		return;
 
+	new.freelist = head;
 	do {
 		if (unlikely(n)) {
 			spin_unlock_irqrestore(&n->list_lock, flags);
 			n = NULL;
 		}
-		prior = page->freelist;
-		counters = page->counters;
-		set_freepointer(s, tail, prior);
-		new.counters = counters;
-		was_frozen = new.frozen;
+		old = read_page_list(page);
+		set_freepointer(s, tail, old.freelist);
+		new.counters = old.counters;
 		new.inuse -= cnt;
-		if ((!new.inuse || !prior) && !was_frozen) {
+		if ((!new.inuse || !old.freelist) && !old.frozen) {
 
-			if (kmem_cache_has_cpu_partial(s) && !prior) {
+			if (kmem_cache_has_cpu_partial(s) && !old.freelist) {
 
 				/*
 				 * Slab was on no list before and will be
@@ -3004,14 +3002,11 @@ static void __slab_free(struct kmem_cache *s, struct page *page,
 			}
 		}
 
-	} while (!cmpxchg_double_slab(s, page,
-		prior, counters,
-		head, new.counters,
-		"__slab_free"));
+	} while (!cmpxchg_double_slab(s, page, old, new, "__slab_free"));
 
 	if (likely(!n)) {
 
-		if (likely(was_frozen)) {
+		if (likely(old.frozen)) {
 			/*
 			 * The list lock was not taken therefore no list
 			 * activity can be necessary.
@@ -3036,7 +3031,7 @@ static void __slab_free(struct kmem_cache *s, struct page *page,
 	 * Objects left in the slab. If it was not on the partial list before
 	 * then add it.
 	 */
-	if (!kmem_cache_has_cpu_partial(s) && unlikely(!prior)) {
+	if (!kmem_cache_has_cpu_partial(s) && unlikely(!old.freelist)) {
 		remove_full(s, n, page);
 		add_partial(n, page, DEACTIVATE_TO_TAIL);
 		stat(s, FREE_ADD_PARTIAL);
@@ -3045,7 +3040,7 @@ static void __slab_free(struct kmem_cache *s, struct page *page,
 	return;
 
 slab_empty:
-	if (prior) {
+	if (old.freelist) {
 		/*
 		 * Slab on the partial list.
 		 */
@@ -3516,7 +3511,7 @@ static void early_kmem_cache_node_alloc(int node)
 		pr_err("SLUB: Allocating a useless per node structure in order to be able to continue\n");
 	}
 
-	n = page->freelist;
+	n = page->slub_head.freelist;
 	BUG_ON(!n);
 #ifdef CONFIG_SLUB_DEBUG
 	init_object(kmem_cache_node, n, SLUB_RED_ACTIVE);
@@ -3524,12 +3519,12 @@ static void early_kmem_cache_node_alloc(int node)
 #endif
 	n = kasan_kmalloc(kmem_cache_node, n, sizeof(struct kmem_cache_node),
 		      GFP_KERNEL);
-	page->freelist = get_freepointer(kmem_cache_node, n);
-	page->inuse = 1;
-	page->frozen = 0;
+	page->slub_head.freelist = get_freepointer(kmem_cache_node, n);
+	page->slub_head.inuse = 1;
+	page->slub_head.frozen = 0;
 	kmem_cache_node->node[node] = n;
 	init_kmem_cache_node(n);
-	inc_slabs_node(kmem_cache_node, node, page->objects);
+	inc_slabs_node(kmem_cache_node, node, page->slub_head.objects);
 
 	/*
 	 * No locks need to be taken here as it has just been
@@ -3839,7 +3834,7 @@ static void list_slab_objects(struct kmem_cache *s, struct page *page,
 	slab_lock(page);
 
 	map = get_map(s, page);
-	for_each_object(p, s, addr, page->objects) {
+	for_each_object(p, s, addr, page->slub_head.objects) {
 
 		if (!test_bit(__obj_to_index(s, addr, p), map)) {
 			pr_err("INFO: Object 0x%p @offset=%tu\n", p, p - addr);
@@ -3864,7 +3859,7 @@ static void free_partial(struct kmem_cache *s, struct kmem_cache_node *n)
 	BUG_ON(irqs_disabled());
 	spin_lock_irq(&n->list_lock);
 	list_for_each_entry_safe(page, h, &n->partial, slab_list) {
-		if (!page->inuse) {
+		if (!page->slub_head.inuse) {
 			remove_partial(n, page);
 			list_add(&page->slab_list, &discard);
 		} else {
@@ -4152,7 +4147,8 @@ int __kmem_cache_shrink(struct kmem_cache *s)
 		 * list_lock. page->inuse here is the upper limit.
 		 */
 		list_for_each_entry_safe(page, t, &n->partial, slab_list) {
-			int free = page->objects - page->inuse;
+			struct slub_list_head *head = &page->slub_head;
+			int free = head->objects - head->inuse;
 
 			/* Do not reread page->inuse */
 			barrier();
@@ -4160,7 +4156,7 @@ int __kmem_cache_shrink(struct kmem_cache *s)
 			/* We do not keep full slabs on the list */
 			BUG_ON(free <= 0);
 
-			if (free == page->objects) {
+			if (free == head->objects) {
 				list_move(&page->slab_list, &discard);
 				n->nr_partial--;
 			} else if (free <= SHRINK_PROMOTE_MAX)
@@ -4494,12 +4490,12 @@ EXPORT_SYMBOL(__kmalloc_node_track_caller);
 #ifdef CONFIG_SYSFS
 static int count_inuse(struct page *page)
 {
-	return page->inuse;
+	return page->slub_head.inuse;
 }
 
 static int count_total(struct page *page)
 {
-	return page->objects;
+	return page->slub_head.objects;
 }
 #endif
 
@@ -4517,7 +4513,7 @@ static void validate_slab(struct kmem_cache *s, struct page *page)
 
 	/* Now we know that a valid freelist exists */
 	map = get_map(s, page);
-	for_each_object(p, s, addr, page->objects) {
+	for_each_object(p, s, addr, page->slub_head.objects) {
 		u8 val = test_bit(__obj_to_index(s, addr, p), map) ?
 			 SLUB_RED_INACTIVE : SLUB_RED_ACTIVE;
 
@@ -4708,7 +4704,7 @@ static void process_slab(struct loc_track *t, struct kmem_cache *s,
 	unsigned long *map;
 
 	map = get_map(s, page);
-	for_each_object(p, s, addr, page->objects)
+	for_each_object(p, s, addr, page->slub_head.objects)
 		if (!test_bit(__obj_to_index(s, addr, p), map))
 			add_location(t, s, get_track(s, p, alloc));
 	put_map(map);
@@ -4910,9 +4906,9 @@ static ssize_t show_slab_objects(struct kmem_cache *s,
 
 			node = page_to_nid(page);
 			if (flags & SO_TOTAL)
-				x = page->objects;
+				x = page->slub_head.objects;
 			else if (flags & SO_OBJECTS)
-				x = page->inuse;
+				x = page->slub_head.inuse;
 			else
 				x = 1;
 
