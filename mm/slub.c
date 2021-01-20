@@ -365,7 +365,11 @@ static inline struct slub_list_head read_page_list(struct page *page)
 	return head;
 }
 
+#ifdef CONFIG_SLUB_SINGLE_WORD_FREELIST
+#define SLUB_HEAD_EMPTY ((slub_head_ptr_t) { .val = 1 })
+#else
 #define SLUB_HEAD_EMPTY ((slub_head_ptr_t) { .val = NULL })
+#endif
 
 /*
  * Decode the page freelist head @head, which is part of the same slab page as
@@ -373,7 +377,27 @@ static inline struct slub_list_head read_page_list(struct page *page)
  */
 static inline void *decode_head_fast(void *base, slub_head_ptr_t head)
 {
+#ifdef CONFIG_SLUB_SINGLE_WORD_FREELIST
+	unsigned long base_high;
+
+	if (head.val & 1)
+		return NULL;
+
+	/*
+	 * We only store the low 32 bits of the freelist head pointer in
+	 * struct page.
+	 * Because the page allocator guarantees that order-N pages
+	 * have order-N alignment, we know that a slab page can't straddle a
+	 * 4 GiB boundary (it would have to be >= 8 GiB large for that).
+	 * Therefore, we can just take the high 32 bits of any pointer into the
+	 * same slab page, and stick those bits on top of our truncated pointer
+	 * to get the original pointer back.
+	 */
+	base_high = (unsigned long)base & ~(unsigned long)UINT_MAX;
+	return (void*)(base_high | head.val);
+#else
 	return head.val;
+#endif
 }
 
 /*
@@ -382,17 +406,39 @@ static inline void *decode_head_fast(void *base, slub_head_ptr_t head)
  */
 static inline void *decode_head(struct page *page, slub_head_ptr_t head)
 {
+#ifdef CONFIG_SLUB_SINGLE_WORD_FREELIST
+	if (head.val & 1)
+		return NULL;
+
+	/*
+	 * This is like decode_head_fast(), but we don't have the address of an
+	 * object inside the page, so we have to use page_to_virt() to get
+	 * such an address (which is slow).
+	 * Note that the bitwise OR below can *NOT* be replaced with
+	 * an addition; head.val is a truncated pointer, not an offset.
+	 */
+	return (void*)(((unsigned long)page_to_virt(page)) | head.val);
+#else
 	return head.val;
+#endif
 }
 
 static inline slub_head_ptr_t encode_head(void *head)
 {
+#ifdef CONFIG_SLUB_SINGLE_WORD_FREELIST
+	return (slub_head_ptr_t) { .val = (unsigned int)(unsigned long)head };
+#else
 	return (slub_head_ptr_t) { .val = head };
+#endif
 }
 
 static inline bool head_empty(slub_head_ptr_t head)
 {
+#ifdef CONFIG_SLUB_SINGLE_WORD_FREELIST
+	return head.val & 1;
+#else
 	return head.val == NULL;
+#endif
 }
 
 /* Interrupts must be disabled (for the fallback code to work right) */
@@ -403,7 +449,12 @@ static inline bool __cmpxchg_double_slab(struct kmem_cache *s, struct page *page
 	struct slub_list_head *head = &page->slub_head;
 
 	VM_BUG_ON(!irqs_disabled());
-#if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
+#ifdef CONFIG_SLUB_SINGLE_WORD_FREELIST
+	if (!kmem_cache_debug_flags(s, SLAB_NO_CMPXCHG)) {
+		if (try_cmpxchg(head, &old, new))
+			return true;
+	} else
+#elif defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
     defined(CONFIG_HAVE_ALIGNED_STRUCT_PAGE)
 	if (s->flags & __CMPXCHG_DOUBLE) {
 		if (cmpxchg_double(&head->freelist, &head->counters,
@@ -439,7 +490,12 @@ static inline bool cmpxchg_double_slab(struct kmem_cache *s, struct page *page,
 {
 	struct slub_list_head *head = &page->slub_head;
 
-#if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
+#ifdef CONFIG_SLUB_SINGLE_WORD_FREELIST
+	if (!kmem_cache_debug_flags(s, SLAB_NO_CMPXCHG)) {
+		if (try_cmpxchg(head, &old, new))
+			return true;
+	} else
+#elif defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
     defined(CONFIG_HAVE_ALIGNED_STRUCT_PAGE)
 	if (s->flags & __CMPXCHG_DOUBLE) {
 		if (cmpxchg_double(&head->freelist, &head->counters,

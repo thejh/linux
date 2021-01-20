@@ -1865,6 +1865,16 @@ config SLUB_MEMCG_SYSFS_ON
 	  controlled by slub_memcg_sysfs boot parameter and this
 	  config option determines the parameter's default value.
 
+config SLUB_SINGLE_WORD_FREELIST
+	bool "Compress SLUB page freelist head to one word"
+	depends on SLUB && 64BIT
+	help
+	  Compress the SLUB freelist head into one word instead of two.
+	  If your architecture supports double-word cmpxchg, this will
+	  reduce the alignment of struct page, which may increase
+	  available memory by ~0.2% if there would otherwise be a padding hole
+	  (usually when MEMCG is disabled).
+
 config COMPAT_BRK
 	bool "Disable heap randomization"
 	default y

@@ -68,18 +68,26 @@ struct mem_cgroup;
 
 #ifdef CONFIG_SLUB
 typedef struct {
+#ifdef CONFIG_SLUB_SINGLE_WORD_FREELIST
+	unsigned int val;
+#else
 	void *val;
+#endif
 } slub_head_ptr_t;
 struct slub_list_head {
-	slub_head_ptr_t freelist;
 	union {
+#ifdef CONFIG_SLUB_SINGLE_WORD_FREELIST
+		unsigned int counters;
+#else
 		unsigned long counters;
+#endif
 		struct {
 			unsigned inuse:16;
 			unsigned objects:15;
 			unsigned frozen:1;
 		};
 	};
+	slub_head_ptr_t freelist;
 };
 #endif
 
