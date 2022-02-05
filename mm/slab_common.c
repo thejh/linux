@@ -737,7 +737,8 @@ struct kmem_cache *kmalloc_slab(size_t size, gfp_t flags)
 		index = fls(size - 1);
 	}
 
-	return kmalloc_caches[kmalloc_type(flags)][index];
+	return kmalloc_caches[kmalloc_type(flags) +
+		KMALLOC_VARSIZE_OFFSET][index];
 }
 
 size_t kmalloc_size_roundup(size_t size)
@@ -760,30 +761,47 @@ size_t kmalloc_size_roundup(size_t size)
 }
 EXPORT_SYMBOL(kmalloc_size_roundup);
 
+#define KMALLOC_NORMAL_NAME(prefix, off, sz) \
+	.name[off + KMALLOC_NORMAL]  = prefix "kmalloc-" #sz,
+
 #ifdef CONFIG_ZONE_DMA
-#define KMALLOC_DMA_NAME(sz)	.name[KMALLOC_DMA] = "dma-kmalloc-" #sz,
+#define KMALLOC_DMA_NAME(prefix, off, sz) \
+	.name[off + KMALLOC_DMA] = prefix "dma-kmalloc-" #sz,
 #else
-#define KMALLOC_DMA_NAME(sz)
+#define KMALLOC_DMA_NAME(prefix, off, sz)
 #endif
 
 #ifdef CONFIG_MEMCG_KMEM
-#define KMALLOC_CGROUP_NAME(sz)	.name[KMALLOC_CGROUP] = "kmalloc-cg-" #sz,
+#define KMALLOC_CGROUP_NAME(prefix, off, sz) \
+	.name[off + KMALLOC_CGROUP] = prefix "kmalloc-cg-" #sz,
 #else
-#define KMALLOC_CGROUP_NAME(sz)
+#define KMALLOC_CGROUP_NAME(prefix, off, sz)
 #endif
 
 #ifndef CONFIG_SLUB_TINY
-#define KMALLOC_RCL_NAME(sz)	.name[KMALLOC_RECLAIM] = "kmalloc-rcl-" #sz,
+#define KMALLOC_RCL_NAME(prefix, off, sz) \
+	.name[off + KMALLOC_RECLAIM] = prefix "kmalloc-rcl-" #sz,
 #else
-#define KMALLOC_RCL_NAME(sz)
+#define KMALLOC_RCL_NAME(prefix, off, sz)
+#endif
+
+#define KMALLOC_ALL_NAMES(prefix, off, sz)	\
+	KMALLOC_NORMAL_NAME(prefix, off, sz)	\
+	KMALLOC_RCL_NAME(prefix, off, sz)	\
+	KMALLOC_CGROUP_NAME(prefix, off, sz)	\
+	KMALLOC_DMA_NAME(prefix, off, sz)
+
+#ifdef CONFIG_KMALLOC_SPLIT_VARSIZE
+#define KMALLOC_VARSIZE_NAMES(sz) \
+	KMALLOC_ALL_NAMES("dyn-", KMALLOC_VARSIZE_OFFSET, sz)
+#else
+#define KMALLOC_VARSIZE_NAMES(sz)
 #endif
 
 #define INIT_KMALLOC_INFO(__size, __short_size)			\
 {								\
-	.name[KMALLOC_NORMAL]  = "kmalloc-" #__short_size,	\
-	KMALLOC_RCL_NAME(__short_size)				\
-	KMALLOC_CGROUP_NAME(__short_size)			\
-	KMALLOC_DMA_NAME(__short_size)				\
+	KMALLOC_ALL_NAMES("", 0, __short_size)			\
+	KMALLOC_VARSIZE_NAMES(__short_size)			\
 	.size = __size,						\
 }
 
@@ -872,6 +890,9 @@ new_kmalloc_cache(int idx, enum kmalloc_cache_type type, slab_flags_t flags)
 	} else if (IS_ENABLED(CONFIG_MEMCG_KMEM) && (type == KMALLOC_CGROUP)) {
 		if (mem_cgroup_kmem_disabled()) {
 			kmalloc_caches[type][idx] = kmalloc_caches[KMALLOC_NORMAL][idx];
+			if (IS_ENABLED(CONFIG_KMALLOC_SPLIT_VARSIZE))
+				kmalloc_caches[type + KMALLOC_VARSIZE_OFFSET][idx] =
+				kmalloc_caches[KMALLOC_NORMAL + KMALLOC_VARSIZE_OFFSET][idx];
 			return;
 		}
 		flags |= SLAB_ACCOUNT;
@@ -884,12 +905,22 @@ new_kmalloc_cache(int idx, enum kmalloc_cache_type type, slab_flags_t flags)
 					kmalloc_info[idx].size, flags, 0,
 					kmalloc_info[idx].size);
 
+	if (IS_ENABLED(CONFIG_KMALLOC_SPLIT_VARSIZE))
+		kmalloc_caches[type + KMALLOC_VARSIZE_OFFSET][idx] =
+			create_kmalloc_cache(
+				kmalloc_info[idx].name[type + KMALLOC_VARSIZE_OFFSET],
+				kmalloc_info[idx].size, flags, 0,
+				kmalloc_info[idx].size);
+
 	/*
 	 * If CONFIG_MEMCG_KMEM is enabled, disable cache merging for
 	 * KMALLOC_NORMAL caches.
 	 */
-	if (IS_ENABLED(CONFIG_MEMCG_KMEM) && (type == KMALLOC_NORMAL))
+	if (IS_ENABLED(CONFIG_MEMCG_KMEM) && (type == KMALLOC_NORMAL)) {
 		kmalloc_caches[type][idx]->refcount = -1;
+		if (IS_ENABLED(CONFIG_KMALLOC_SPLIT_VARSIZE))
+			kmalloc_caches[type + KMALLOC_VARSIZE_OFFSET][idx]->refcount = -1;
+	}
 }
 
 /*
@@ -905,7 +936,7 @@ void __init create_kmalloc_caches(slab_flags_t flags)
 	/*
 	 * Including KMALLOC_CGROUP if CONFIG_MEMCG_KMEM defined
 	 */
-	for (type = KMALLOC_NORMAL; type < NR_KMALLOC_TYPES; type++) {
+	for (type = KMALLOC_NORMAL; type < NR_KMALLOC_TYPES_BASE; type++) {
 		for (i = KMALLOC_SHIFT_LOW; i <= KMALLOC_SHIFT_HIGH; i++) {
 			if (!kmalloc_caches[type][i])
 				new_kmalloc_cache(i, type, flags);

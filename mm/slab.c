@@ -1261,6 +1261,20 @@ void __init kmem_cache_init(void)
 	}
 
 	create_kmalloc_caches(ARCH_KMALLOC_FLAGS);
+
+	/*
+	 * create_kmalloc_caches will not create the variable-size normal
+	 * kmalloc cache for INDEX_NODE because the fixed-size cache has already
+	 * been created above, so we have to create it manually.
+	 */
+	if (IS_ENABLED(CONFIG_KMALLOC_SPLIT_VARSIZE))
+		kmalloc_caches[KMALLOC_NORMAL + KMALLOC_VARSIZE_OFFSET][INDEX_NODE] =
+			create_kmalloc_cache(
+				kmalloc_info[INDEX_NODE].name[
+					KMALLOC_NORMAL + KMALLOC_VARSIZE_OFFSET],
+				kmalloc_info[INDEX_NODE].size,
+				ARCH_KMALLOC_FLAGS, 0,
+				kmalloc_info[INDEX_NODE].size);
 }
 
 void __init kmem_cache_init_late(void)
