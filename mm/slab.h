@@ -556,7 +556,7 @@ kmalloc_slab(size_t size, kmem_buckets *b, gfp_t flags, unsigned long caller)
 	unsigned int index;
 
 	if (!b)
-		b = &kmalloc_caches[kmalloc_type(flags, caller)];
+		b = &kmalloc_caches[kmalloc_type(flags, caller) + KMALLOC_VARSIZE_OFFSET];
 	if (size <= 192)
 		index = kmalloc_size_index[size_index_elem(size)];
 	else
