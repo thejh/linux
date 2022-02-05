@@ -736,7 +736,8 @@ struct kmem_cache *kmalloc_slab(size_t size, gfp_t flags, unsigned long caller)
 		index = fls(size - 1);
 	}
 
-	return kmalloc_caches[kmalloc_type(flags, caller)][index];
+	return kmalloc_caches[kmalloc_type(flags, caller) +
+		KMALLOC_VARSIZE_OFFSET][index];
 }
 
 size_t kmalloc_size_roundup(size_t size)
@@ -763,47 +764,70 @@ size_t kmalloc_size_roundup(size_t size)
 EXPORT_SYMBOL(kmalloc_size_roundup);
 
 #ifdef CONFIG_ZONE_DMA
-#define KMALLOC_DMA_NAME(sz)	.name[KMALLOC_DMA] = "dma-kmalloc-" #sz,
+#define KMALLOC_DMA_NAME(prefix, off, sz) \
+	.name[off + KMALLOC_DMA] = prefix "dma-kmalloc-" #sz,
 #else
-#define KMALLOC_DMA_NAME(sz)
+#define KMALLOC_DMA_NAME(prefix, off, sz)
 #endif
 
 #ifdef CONFIG_RANDOM_KMALLOC_CACHES
 #define __KMALLOC_RANDOM_CONCAT(a, b) a ## b
-#define KMALLOC_RANDOM_NAME(N, sz, base, type) __KMALLOC_RANDOM_CONCAT(KMA_RAND_, N)(sz, base, type)
-#define KMA_RAND_1(sz, base, type)                        .name[base +  1] = "kmalloc-rnd-01-" type #sz,
-#define KMA_RAND_2(sz, base, type)  KMA_RAND_1(sz, base, type)  .name[base +  2] = "kmalloc-rnd-02-" type #sz,
-#define KMA_RAND_3(sz, base, type)  KMA_RAND_2(sz, base, type)  .name[base +  3] = "kmalloc-rnd-03-" type #sz,
-#define KMA_RAND_4(sz, base, type)  KMA_RAND_3(sz, base, type)  .name[base +  4] = "kmalloc-rnd-04-" type #sz,
-#define KMA_RAND_5(sz, base, type)  KMA_RAND_4(sz, base, type)  .name[base +  5] = "kmalloc-rnd-05-" type #sz,
-#define KMA_RAND_6(sz, base, type)  KMA_RAND_5(sz, base, type)  .name[base +  6] = "kmalloc-rnd-06-" type #sz,
-#define KMA_RAND_7(sz, base, type)  KMA_RAND_6(sz, base, type)  .name[base +  7] = "kmalloc-rnd-07-" type #sz,
-#define KMA_RAND_8(sz, base, type)  KMA_RAND_7(sz, base, type)  .name[base +  8] = "kmalloc-rnd-08-" type #sz,
-#define KMA_RAND_9(sz, base, type)  KMA_RAND_8(sz, base, type)  .name[base +  9] = "kmalloc-rnd-09-" type #sz,
-#define KMA_RAND_10(sz, base, type) KMA_RAND_9(sz, base, type)  .name[base + 10] = "kmalloc-rnd-10-" type #sz,
-#define KMA_RAND_11(sz, base, type) KMA_RAND_10(sz, base, type) .name[base + 11] = "kmalloc-rnd-11-" type #sz,
-#define KMA_RAND_12(sz, base, type) KMA_RAND_11(sz, base, type) .name[base + 12] = "kmalloc-rnd-12-" type #sz,
-#define KMA_RAND_13(sz, base, type) KMA_RAND_12(sz, base, type) .name[base + 13] = "kmalloc-rnd-13-" type #sz,
-#define KMA_RAND_14(sz, base, type) KMA_RAND_13(sz, base, type) .name[base + 14] = "kmalloc-rnd-14-" type #sz,
-#define KMA_RAND_15(sz, base, type) KMA_RAND_14(sz, base, type) .name[base + 15] = "kmalloc-rnd-15-" type #sz,
+#define KMALLOC_RANDOM_NAME(prefix, N, sz, base, offset, type) __KMALLOC_RANDOM_CONCAT(KMA_RAND_, N)(prefix, sz, base, offset, type)
+#define KMA_RAND_1(prefix, sz, base, offset, type)                                              .name[base + offset +  1] = prefix "kmalloc-rnd-01-" type #sz,
+#define KMA_RAND_2(prefix, sz, base, offset, type)  KMA_RAND_1(prefix, sz, base, offset, type)  .name[base + offset +  2] = prefix "kmalloc-rnd-02-" type #sz,
+#define KMA_RAND_3(prefix, sz, base, offset, type)  KMA_RAND_2(prefix, sz, base, offset, type)  .name[base + offset +  3] = prefix "kmalloc-rnd-03-" type #sz,
+#define KMA_RAND_4(prefix, sz, base, offset, type)  KMA_RAND_3(prefix, sz, base, offset, type)  .name[base + offset +  4] = prefix "kmalloc-rnd-04-" type #sz,
+#define KMA_RAND_5(prefix, sz, base, offset, type)  KMA_RAND_4(prefix, sz, base, offset, type)  .name[base + offset +  5] = prefix "kmalloc-rnd-05-" type #sz,
+#define KMA_RAND_6(prefix, sz, base, offset, type)  KMA_RAND_5(prefix, sz, base, offset, type)  .name[base + offset +  6] = prefix "kmalloc-rnd-06-" type #sz,
+#define KMA_RAND_7(prefix, sz, base, offset, type)  KMA_RAND_6(prefix, sz, base, offset, type)  .name[base + offset +  7] = prefix "kmalloc-rnd-07-" type #sz,
+#define KMA_RAND_8(prefix, sz, base, offset, type)  KMA_RAND_7(prefix, sz, base, offset, type)  .name[base + offset +  8] = prefix "kmalloc-rnd-08-" type #sz,
+#define KMA_RAND_9(prefix, sz, base, offset, type)  KMA_RAND_8(prefix, sz, base, offset, type)  .name[base + offset +  9] = prefix "kmalloc-rnd-09-" type #sz,
+#define KMA_RAND_10(prefix, sz, base, offset, type) KMA_RAND_9(prefix, sz, base, offset, type)  .name[base + offset + 10] = prefix "kmalloc-rnd-10-" type #sz,
+#define KMA_RAND_11(prefix, sz, base, offset, type) KMA_RAND_10(prefix, sz, base, offset, type) .name[base + offset + 11] = prefix "kmalloc-rnd-11-" type #sz,
+#define KMA_RAND_12(prefix, sz, base, offset, type) KMA_RAND_11(prefix, sz, base, offset, type) .name[base + offset + 12] = prefix "kmalloc-rnd-12-" type #sz,
+#define KMA_RAND_13(prefix, sz, base, offset, type) KMA_RAND_12(prefix, sz, base, offset, type) .name[base + offset + 13] = prefix "kmalloc-rnd-13-" type #sz,
+#define KMA_RAND_14(prefix, sz, base, offset, type) KMA_RAND_13(prefix, sz, base, offset, type) .name[base + offset + 14] = prefix "kmalloc-rnd-14-" type #sz,
+#define KMA_RAND_15(prefix, sz, base, offset, type) KMA_RAND_14(prefix, sz, base, offset, type) .name[base + offset + 15] = prefix "kmalloc-rnd-15-" type #sz,
 #else // CONFIG_RANDOM_KMALLOC_CACHES
-#define KMALLOC_RANDOM_NAME(N, sz, base, type)
+#define KMALLOC_RANDOM_NAME(prefix, N, sz, base, offset, type)
 #endif
 
+#define KMALLOC_NORMAL_NAME(prefix, off, sz) \
+	.name[off + KMALLOC_NORMAL]  = prefix "kmalloc-" #sz, \
+	KMALLOC_RANDOM_NAME(prefix, RANDOM_KMALLOC_CACHES_NR, sz, KMALLOC_RANDOM_START, off, "")
+
 #ifdef CONFIG_MEMCG_KMEM
-#define KMALLOC_CGROUP_NAME(sz)	.name[KMALLOC_CGROUP] = "kmalloc-cg-" #sz, \
-	KMALLOC_RANDOM_NAME(RANDOM_KMALLOC_CACHES_NR, sz, KMALLOC_CGROUP_RANDOM_START, "cg-")
+#define KMALLOC_CGROUP_NAME(prefix, off, sz) \
+	.name[off + KMALLOC_CGROUP] = prefix "kmalloc-cg-" #sz, \
+	KMALLOC_RANDOM_NAME(prefix, RANDOM_KMALLOC_CACHES_NR, sz, KMALLOC_CGROUP_RANDOM_START, off, "cg-")
 #else
-#define KMALLOC_CGROUP_NAME(sz)
+#define KMALLOC_CGROUP_NAME(prefix, off, sz)
+#endif
+
+#ifndef CONFIG_SLUB_TINY
+#define KMALLOC_RCL_NAME(prefix, off, sz) \
+	.name[off + KMALLOC_RECLAIM] = prefix "kmalloc-rcl-" #sz,
+#else
+#define KMALLOC_RCL_NAME(prefix, off, sz)
+#endif
+
+#define KMALLOC_ALL_NAMES(prefix, off, sz)	\
+	KMALLOC_NORMAL_NAME(prefix, off, sz)	\
+	KMALLOC_RCL_NAME(prefix, off, sz)	\
+	KMALLOC_CGROUP_NAME(prefix, off, sz)	\
+	KMALLOC_DMA_NAME(prefix, off, sz)
+
+#ifdef CONFIG_KMALLOC_SPLIT_VARSIZE
+#define KMALLOC_VARSIZE_NAMES(sz) \
+	KMALLOC_ALL_NAMES("dyn-", KMALLOC_VARSIZE_OFFSET, sz)
+#else
+#define KMALLOC_VARSIZE_NAMES(sz)
 #endif
 
 #define INIT_KMALLOC_INFO(__size, __short_size)			\
 {								\
-	.name[KMALLOC_NORMAL]  = "kmalloc-" #__short_size,	\
-	.name[KMALLOC_RECLAIM] = "kmalloc-rcl-" #__short_size,	\
-	KMALLOC_CGROUP_NAME(__short_size)			\
-	KMALLOC_DMA_NAME(__short_size)				\
-	KMALLOC_RANDOM_NAME(RANDOM_KMALLOC_CACHES_NR, __short_size, KMALLOC_RANDOM_START, "")	\
+	KMALLOC_ALL_NAMES("", 0, __short_size)			\
+	KMALLOC_VARSIZE_NAMES(__short_size)			\
 	.size = __size,						\
 }
 
@@ -892,6 +916,9 @@ new_kmalloc_cache(int idx, enum kmalloc_cache_type type, slab_flags_t flags)
 	} else if (IS_ENABLED(CONFIG_MEMCG_KMEM) && (type == KMALLOC_CGROUP)) {
 		if (mem_cgroup_kmem_disabled()) {
 			kmalloc_caches[type][idx] = kmalloc_caches[KMALLOC_NORMAL][idx];
+			if (IS_ENABLED(CONFIG_KMALLOC_SPLIT_VARSIZE))
+				kmalloc_caches[type + KMALLOC_VARSIZE_OFFSET][idx] =
+				kmalloc_caches[KMALLOC_NORMAL + KMALLOC_VARSIZE_OFFSET][idx];
 			return;
 		}
 		flags |= SLAB_ACCOUNT;
@@ -904,12 +931,12 @@ new_kmalloc_cache(int idx, enum kmalloc_cache_type type, slab_flags_t flags)
 					kmalloc_info[idx].size, flags, 0,
 					kmalloc_info[idx].size);
 
-	/*
-	 * If CONFIG_MEMCG_KMEM is enabled, disable cache merging for
-	 * KMALLOC_NORMAL caches.
-	 */
-	if (IS_ENABLED(CONFIG_MEMCG_KMEM) && (type == KMALLOC_NORMAL))
-		kmalloc_caches[type][idx]->refcount = -1;
+	if (IS_ENABLED(CONFIG_KMALLOC_SPLIT_VARSIZE))
+		kmalloc_caches[type + KMALLOC_VARSIZE_OFFSET][idx] =
+			create_kmalloc_cache(
+				kmalloc_info[idx].name[type + KMALLOC_VARSIZE_OFFSET],
+				kmalloc_info[idx].size, flags, 0,
+				kmalloc_info[idx].size);
 }
 
 /*
@@ -925,7 +952,7 @@ void __init create_kmalloc_caches(slab_flags_t flags)
 	/*
 	 * Including KMALLOC_CGROUP if CONFIG_MEMCG_KMEM defined
 	 */
-	for (type = KMALLOC_NORMAL; type < NR_KMALLOC_TYPES; type++) {
+	for (type = KMALLOC_NORMAL; type < NR_KMALLOC_TYPES_BASE; type++) {
 		for (i = KMALLOC_SHIFT_LOW; i <= KMALLOC_SHIFT_HIGH; i++) {
 			if (!kmalloc_caches[type][i])
 				new_kmalloc_cache(i, type, flags);
