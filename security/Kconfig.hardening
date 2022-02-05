@@ -359,4 +359,14 @@ config SLAB_VIRTUAL
 	  This is experimental and likely comes with noticeable performance
 	  impact.
 
+config KMALLOC_SPLIT_VARSIZE
+  depends on SLUB && !SLAB_MERGE_DEFAULT
+  bool "Store variably-sized kmalloc() allocations in separate slabs"
+  help
+    Duplicate each kmalloc() slab into one for fixed-size objects and
+    one for variably-sized objects.
+    This prevents abusing syscalls that can allocate arbitrarily-sized
+    objects (often containing lots of raw data from userspace) for
+    exploiting memory corruption issues in attacker-chosen kmalloc slabs.
+
 endmenu

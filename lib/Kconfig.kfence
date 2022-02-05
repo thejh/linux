@@ -87,6 +87,8 @@ config KFENCE_KUNIT_TEST
 	tristate "KFENCE integration test suite" if !KUNIT_ALL_TESTS
 	default KUNIT_ALL_TESTS
 	depends on TRACEPOINTS && KUNIT
+	# unit test wants to inspect specific kmalloc slab, but we duplicate them
+	depends on !KMALLOC_SPLIT_VARSIZE
 	help
 	  Test suite for KFENCE, testing various error detection scenarios with
 	  various allocation types, and checking that reports are correctly

@@ -746,29 +746,44 @@ struct kmem_cache *kmalloc_slab(size_t size, gfp_t flags)
 		index = fls(size - 1);
 	}
 
-	return kmalloc_caches[kmalloc_type(flags)][index];
+	return kmalloc_caches[kmalloc_type(flags) + KMALLOC_DYNSIZE_TYPE_SHIFT][index];
 }
 
 #ifdef CONFIG_ZONE_DMA
-#define KMALLOC_DMA_NAME(sz)	.name[KMALLOC_DMA] = "dma-kmalloc-" #sz,
+#define KMALLOC_DMA_NAME(prefix,off,sz) .name[off+KMALLOC_DMA] = prefix "dma-kmalloc-" #sz,
 #else
-#define KMALLOC_DMA_NAME(sz)
+#define KMALLOC_DMA_NAME(prefix,off,sz)
 #endif
 
 #ifdef CONFIG_MEMCG_KMEM
-#define KMALLOC_CGROUP_NAME(sz)	.name[KMALLOC_CGROUP] = "kmalloc-cg-" #sz,
+#define KMALLOC_CGROUP_NAME(prefix,off,sz) .name[off+KMALLOC_CGROUP] = prefix "kmalloc-cg-" #sz,
 #else
-#define KMALLOC_CGROUP_NAME(sz)
+#define KMALLOC_CGROUP_NAME(prefix,off,sz)
 #endif
 
+#ifdef CONFIG_KMALLOC_SPLIT_VARSIZE
 #define INIT_KMALLOC_INFO(__size, __short_size)			\
 {								\
 	.name[KMALLOC_NORMAL]  = "kmalloc-" #__short_size,	\
 	.name[KMALLOC_RECLAIM] = "kmalloc-rcl-" #__short_size,	\
-	KMALLOC_CGROUP_NAME(__short_size)			\
-	KMALLOC_DMA_NAME(__short_size)				\
+	KMALLOC_CGROUP_NAME("", 0, __short_size)		\
+	KMALLOC_DMA_NAME("", 0, __short_size)			\
+	.name[KMALLOC_DYNSIZE_TYPE_SHIFT+KMALLOC_NORMAL]  = "dyn-kmalloc-" #__short_size,	\
+	.name[KMALLOC_DYNSIZE_TYPE_SHIFT+KMALLOC_RECLAIM] = "dyn-kmalloc-rcl-" #__short_size,	\
+	KMALLOC_CGROUP_NAME("dyn-", KMALLOC_DYNSIZE_TYPE_SHIFT, __short_size)		\
+	KMALLOC_DMA_NAME("dyn-", KMALLOC_DYNSIZE_TYPE_SHIFT, __short_size)		\
 	.size = __size,						\
 }
+#else
+#define INIT_KMALLOC_INFO(__size, __short_size)			\
+{								\
+	.name[KMALLOC_NORMAL]  = "kmalloc-" #__short_size,	\
+	.name[KMALLOC_RECLAIM] = "kmalloc-rcl-" #__short_size,	\
+	KMALLOC_CGROUP_NAME("", 0, __short_size)		\
+	KMALLOC_DMA_NAME("", 0, __short_size)			\
+	.size = __size,						\
+}
+#endif
 
 /*
  * kmalloc_info[] is to make slub_debug=,kmalloc-xx option work at boot time.
@@ -859,6 +874,10 @@ new_kmalloc_cache(int idx, enum kmalloc_cache_type type, slab_flags_t flags)
 	} else if (IS_ENABLED(CONFIG_MEMCG_KMEM) && (type == KMALLOC_CGROUP)) {
 		if (mem_cgroup_kmem_disabled()) {
 			kmalloc_caches[type][idx] = kmalloc_caches[KMALLOC_NORMAL][idx];
+#ifdef CONFIG_KMALLOC_SPLIT_VARSIZE
+			kmalloc_caches[type + KMALLOC_DYNSIZE_TYPE_SHIFT][idx] =
+			kmalloc_caches[KMALLOC_NORMAL + KMALLOC_DYNSIZE_TYPE_SHIFT][idx];
+#endif
 			return;
 		}
 		flags |= SLAB_ACCOUNT;
@@ -870,6 +889,14 @@ new_kmalloc_cache(int idx, enum kmalloc_cache_type type, slab_flags_t flags)
 					kmalloc_info[idx].name[type],
 					kmalloc_info[idx].size, flags, 0,
 					kmalloc_info[idx].size);
+
+#ifdef CONFIG_KMALLOC_SPLIT_VARSIZE
+	kmalloc_caches[type + KMALLOC_DYNSIZE_TYPE_SHIFT][idx] =
+			create_kmalloc_cache(
+					kmalloc_info[idx].name[type + KMALLOC_DYNSIZE_TYPE_SHIFT],
+					kmalloc_info[idx].size, flags, 0,
+					kmalloc_info[idx].size);
+#endif
 
 	/*
 	 * If CONFIG_MEMCG_KMEM is enabled, disable cache merging for
