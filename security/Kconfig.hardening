@@ -349,4 +349,20 @@ config GCC_PLUGIN_RANDSTRUCT
 	   * https://grsecurity.net/
 	   * https://pax.grsecurity.net/
 
+config KMALLOC_SPLIT_VARSIZE
+  bool "Use separate caches for kmalloc() allocations having variable size"
+  depends on (SLAB || SLUB) && !SLAB_MERGE_DEFAULT
+  help
+    This option splits each kmalloc() cache into two. One is used for fixed-size
+    objects and another for objects whose size can vary at runtime.
+
+    This prevents usermode attackers from abusing syscalls that can allocate
+    arbitrarily-sized objects to exploit memory corruption. Many of these
+    objects (e.g. struct msg_msg) contain attacker-controlled amounts of
+    arbitrary data and are often used in kernel exploits because they can be
+    allocated in any kmalloc() cache.
+
+    See:
+      * https://dl.acm.org/doi/pdf/10.1145/3372297.3423353
+
 endmenu
