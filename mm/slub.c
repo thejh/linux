@@ -593,8 +593,8 @@ static struct workqueue_struct *flushwq;
  * with an XOR of the address where the pointer is held and a per-cache
  * random number.
  */
-static inline void *freelist_ptr(const struct kmem_cache *s, void *ptr,
-				 unsigned long ptr_addr)
+static inline freeptr_t freelist_ptr_encode(const struct kmem_cache *s,
+					    void *ptr, unsigned long ptr_addr)
 {
 #ifdef CONFIG_SLAB_FREELIST_HARDENED
 	/*
@@ -607,10 +607,31 @@ static inline void *freelist_ptr(const struct kmem_cache *s, void *ptr,
 	 * calls get_freepointer() with an untagged pointer, which causes the
 	 * freepointer to be restored incorrectly.
 	 */
-	return (void *)((unsigned long)ptr ^ s->random ^
+	return (freeptr_t){.v=(unsigned long)ptr ^ s->random ^
+			swab((unsigned long)kasan_reset_tag((void *)ptr_addr))};
+#else
+	return (freeptr_t){.v=(unsigned long)ptr};
+#endif
+}
+
+static inline void *freelist_ptr_decode(const struct kmem_cache *s,
+					freeptr_t ptr, unsigned long ptr_addr)
+{
+#ifdef CONFIG_SLAB_FREELIST_HARDENED
+	/*
+	 * When CONFIG_KASAN_SW/HW_TAGS is enabled, ptr_addr might be tagged.
+	 * Normally, this doesn't cause any issues, as both set_freepointer()
+	 * and get_freepointer() are called with a pointer with the same tag.
+	 * However, there are some issues with CONFIG_SLUB_DEBUG code. For
+	 * example, when __free_slub() iterates over objects in a cache, it
+	 * passes untagged pointers to check_object(). check_object() in turns
+	 * calls get_freepointer() with an untagged pointer, which causes the
+	 * freepointer to be restored incorrectly.
+	 */
+	return (void *)(ptr.v ^ s->random ^
 			swab((unsigned long)kasan_reset_tag((void *)ptr_addr)));
 #else
-	return ptr;
+	return (void*)ptr.v;
 #endif
 }
 
@@ -618,14 +639,14 @@ static inline void *freelist_ptr(const struct kmem_cache *s, void *ptr,
 static inline void *freelist_dereference(const struct kmem_cache *s,
 					 void *ptr_addr)
 {
-	return freelist_ptr(s, (void *)*(unsigned long *)(ptr_addr),
-			    (unsigned long)ptr_addr);
+	return freelist_ptr_decode(s, *(freeptr_t*)(ptr_addr),
+				   (unsigned long)ptr_addr);
 }
 
 static inline void *get_freepointer(struct kmem_cache *s, void *object)
 {
 	object = kasan_reset_tag(object);
-	return freelist_dereference(s, object + s->offset);
+	return freelist_dereference(s, (freeptr_t*)(object + s->offset));
 }
 
 static void prefetch_freepointer(const struct kmem_cache *s, void *object)
@@ -647,15 +668,15 @@ __no_kmsan_checks
 static inline void *get_freepointer_safe(struct kmem_cache *s, void *object)
 {
 	unsigned long freepointer_addr;
-	void *p;
+	freeptr_t p;
 
 	if (!debug_pagealloc_enabled_static())
 		return get_freepointer(s, object);
 
 	object = kasan_reset_tag(object);
 	freepointer_addr = (unsigned long)object + s->offset;
-	copy_from_kernel_nofault(&p, (void **)freepointer_addr, sizeof(p));
-	return freelist_ptr(s, p, freepointer_addr);
+	copy_from_kernel_nofault(&p, (freeptr_t*)freepointer_addr, sizeof(p));
+	return freelist_ptr_decode(s, p, freepointer_addr);
 }
 
 static inline void set_freepointer(struct kmem_cache *s, void *object, void *fp)
@@ -667,7 +688,7 @@ static inline void set_freepointer(struct kmem_cache *s, void *object, void *fp)
 #endif
 
 	freeptr_addr = (unsigned long)kasan_reset_tag((void *)freeptr_addr);
-	*(void **)freeptr_addr = freelist_ptr(s, fp, freeptr_addr);
+	*(freeptr_t*)freeptr_addr = freelist_ptr_encode(s, fp, freeptr_addr);
 }
 
 /* Loop over all objects in a slab */
