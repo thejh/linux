@@ -527,6 +527,7 @@ static inline void memcg_slab_post_alloc_hook(struct kmem_cache *s,
 	for (i = 0; i < size; i++) {
 		if (likely(p[i])) {
 			slab = virt_to_slab(p[i]);
+			struct obj_cgroup **cg_ref;
 
 			if (!slab_objcgs(slab) &&
 			    memcg_alloc_slab_cgroups(slab, s, flags,
@@ -537,7 +538,20 @@ static inline void memcg_slab_post_alloc_hook(struct kmem_cache *s,
 
 			off = obj_to_index(s, slab, p[i]);
 			obj_cgroup_get(objcg);
-			slab_objcgs(slab)[off] = objcg;
+			cg_ref = &slab_objcgs(slab)[off];
+			/*
+			 * For allocations covered by memcg, the existing
+			 * infrastructure allows us to relatively cheaply check
+			 * whether a freelist corruption or double-free caused
+			 * an object to be allocated twice without being freed
+			 * in between.
+			 * This also avoids letting the impact of double-frees
+			 * propagate into the memcg subsystem, but that's
+			 * probably not super important?
+			 * (This is *not* a generic double-free detection!)
+			 */
+			(void)!CHECK_DATA_CORRUPTION(*cg_ref, "allocating in-use object");
+			*cg_ref = objcg;
 			mod_objcg_state(objcg, slab_pgdat(slab),
 					cache_vmstat_idx(s), obj_full_size(s));
 		} else {
@@ -579,11 +593,14 @@ static inline void memcg_slab_free_hook(struct kmem_cache *s_orig,
 			s = s_orig;
 
 		off = obj_to_index(s, slab, p[i]);
-		objcg = objcgs[off];
+		/* do this atomically in case a memory corruption is causing two
+		 * invocations of this function to run in parallel on the same
+		 * object
+		 */
+		objcg = xchg(&objcgs[off], NULL);
 		if (!objcg)
 			continue;
 
-		objcgs[off] = NULL;
 		obj_cgroup_uncharge(objcg, obj_full_size(s));
 		mod_objcg_state(objcg, slab_pgdat(slab), cache_vmstat_idx(s),
 				-obj_full_size(s));
