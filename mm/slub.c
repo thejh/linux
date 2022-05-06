@@ -2470,6 +2470,9 @@ redo:
 	/* Determine target state of the slab */
 	new.counters = old.counters;
 	if (freelist_tail) {
+		if (CHECK_DATA_CORRUPTION(new.inuse < free_delta,
+					  "freecount underrun on deactivate"))
+			return; /* leave slab frozen and discard the cpu freelist */
 		new.inuse -= free_delta;
 		set_freepointer(s, freelist_tail, old.freelist);
 		new.freelist = freelist;
@@ -3488,6 +3491,8 @@ static void __slab_free(struct kmem_cache *s, struct slab *slab,
 		set_freepointer(s, tail, prior);
 		new.counters = counters;
 		was_frozen = new.frozen;
+		if (CHECK_DATA_CORRUPTION(new.inuse < cnt, "freecount underrun"))
+			return;
 		new.inuse -= cnt;
 		if ((!new.inuse || !prior) && !was_frozen) {
 
