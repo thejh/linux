@@ -57,7 +57,7 @@ Complete virtual memory map with 4-level page tables
    fffffc0000000000 |   -4    TB | fffffdffffffffff |    2 TB | ... unused hole
                     |            |                  |         | vaddr_end for KASLR
    fffffe0000000000 |   -2    TB | fffffe7fffffffff |  0.5 TB | cpu_entry_area mapping
-   fffffe8000000000 |   -1.5  TB | fffffeffffffffff |  0.5 TB | ... unused hole
+   fffffe8000000000 |   -1.5  TB | fffffeffffffffff |  0.5 TB | SLUB virtual memory
    ffffff0000000000 |   -1    TB | ffffff7fffffffff |  0.5 TB | %esp fixup stacks
    ffffff8000000000 | -512    GB | ffffffeeffffffff |  444 GB | ... unused hole
    ffffffef00000000 |  -68    GB | fffffffeffffffff |   64 GB | EFI region mapping space
@@ -116,7 +116,7 @@ Complete virtual memory map with 5-level page tables
    fffffc0000000000 |   -4    TB | fffffdffffffffff |    2 TB | ... unused hole
                     |            |                  |         | vaddr_end for KASLR
    fffffe0000000000 |   -2    TB | fffffe7fffffffff |  0.5 TB | cpu_entry_area mapping
-   fffffe8000000000 |   -1.5  TB | fffffeffffffffff |  0.5 TB | ... unused hole
+   fffffe8000000000 |   -1.5  TB | fffffeffffffffff |  0.5 TB | SLUB virtual memory
    ffffff0000000000 |   -1    TB | ffffff7fffffffff |  0.5 TB | %esp fixup stacks
    ffffff8000000000 | -512    GB | ffffffeeffffffff |  444 GB | ... unused hole
    ffffffef00000000 |  -68    GB | fffffffeffffffff |   64 GB | EFI region mapping space

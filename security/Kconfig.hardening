@@ -352,6 +352,7 @@ config GCC_PLUGIN_RANDSTRUCT
 config SLAB_VIRTUAL
 	bool "Allocate slab objects from virtual memory"
 	depends on BROKEN # will be removed later in the series
+	depends on X86_64 # for virtual memory region allocation
 	depends on SLUB
 	depends on DEBUG_VIRTUAL # for now
 	# if KFENCE support is desired, it could be implemented on top of our
