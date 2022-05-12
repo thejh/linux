@@ -136,6 +136,11 @@ void __init kernel_randomize_memory(void)
 		vaddr = round_up(vaddr + 1, PUD_SIZE);
 		remain_entropy -= entropy;
 	}
+
+#ifdef CONFIG_SLAB_VIRTUAL
+	prandom_bytes_state(&rand_state, &rand, sizeof(rand));
+	slub_addr_base += (rand & ((1UL << 36) - PAGE_SIZE));
+#endif
 }
 
 void __meminit init_trampoline_kaslr(void)

@@ -1279,16 +1279,18 @@ static void __init register_page_bootmem_info(void)
 }
 
 /*
- * Pre-allocates page-table pages for the vmalloc area in the kernel page-table.
+ * Pre-allocates page-table pages for the vmalloc and SLUB areas in the kernel
+ * page-table.
  * Only the level which needs to be synchronized between all page-tables is
  * allocated because the synchronization can be expensive.
  */
-static void __init preallocate_vmalloc_pages(void)
+static void __init preallocate_top_level_entries_range(unsigned long start, unsigned long end)
 {
 	unsigned long addr;
 	const char *lvl;
 
-	for (addr = VMALLOC_START; addr <= VMEMORY_END; addr = ALIGN(addr + 1, PGDIR_SIZE)) {
+
+	for (addr = start; addr <= end; addr = ALIGN(addr + 1, PGDIR_SIZE)) {
 		pgd_t *pgd = pgd_offset_k(addr);
 		p4d_t *p4d;
 		pud_t *pud;
@@ -1328,6 +1330,14 @@ failed:
 	panic("Failed to pre-allocate %s pages for vmalloc area\n", lvl);
 }
 
+static void __init preallocate_top_level_entries(void)
+{
+	preallocate_top_level_entries_range(VMALLOC_START, VMEMORY_END);
+#ifdef CONFIG_SLAB_VIRTUAL
+	preallocate_top_level_entries_range(SLAB_BASE_ADDR, SLAB_END_ADDR - 1);
+#endif
+}
+
 void __init mem_init(void)
 {
 	pci_iommu_alloc();
@@ -1351,7 +1361,7 @@ void __init mem_init(void)
 	if (get_gate_vma(&init_mm))
 		kclist_add(&kcore_vsyscall, (void *)VSYSCALL_ADDR, PAGE_SIZE, KCORE_USER);
 
-	preallocate_vmalloc_pages();
+	preallocate_top_level_entries();
 }
 
 #ifdef CONFIG_DEFERRED_STRUCT_PAGE_INIT

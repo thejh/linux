@@ -165,6 +165,19 @@
  * 			the fast path and disables lockless freelists.
  */
 
+
+/*
+ * ==================== virtual memory allocation ====================
+ *
+ * We reserve a fairly big, architecture-specific range of kernel virtual memory
+ * for SLUB virtual memory. On X86-64, this is 0.5 TB for now (but we could make
+ * it bigger if we want by grabbing some of the memory that is currently used
+ * for vmalloc and the direct mapping).
+ */
+
+#ifdef CONFIG_SLAB_VIRTUAL
+unsigned long slub_addr_base = SLAB_DATA_BASE_ADDR + PAGE_SIZE;
+#endif /* CONFIG_SLAB_VIRTUAL */
 /*
  * We could simply use migrate_disable()/enable() but as long as it's a
  * function call even on !PREEMPT_RT, use inline preempt_disable() there.
