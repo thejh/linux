@@ -2371,6 +2371,7 @@ static void slub_tlbflush_worker(struct kthread_work *work)
 			WARN_ON(oo_order(slab->oo) != oo_order(s->oo));
 			list_add(&slab->slab_list, &s->freed_slabs_normal);
 		}
+		WRITE_ONCE(s->nr_freed_pages, s->nr_freed_pages + (1UL<<slab_order(slab)));
 		spin_unlock(&s->freed_slabs_lock);
 	}
 	spin_unlock_irqrestore(&slub_kworker_lock, irq_flags);
@@ -4701,6 +4702,7 @@ static int kmem_cache_open(struct kmem_cache *s, slab_flags_t flags)
 	spin_lock_init(&s->freed_slabs_lock);
 	INIT_LIST_HEAD(&s->freed_slabs_normal);
 	INIT_LIST_HEAD(&s->freed_slabs_min);
+	s->nr_freed_pages = 0;
 
 	s->flags = kmem_cache_flags(s->size, flags, s->name);
 #ifdef CONFIG_SLAB_FREELIST_HARDENED
@@ -5864,6 +5866,12 @@ static ssize_t objects_partial_show(struct kmem_cache *s, char *buf)
 }
 SLAB_ATTR_RO(objects_partial);
 
+static ssize_t deallocated_pages_show(struct kmem_cache *s, char *buf)
+{
+	return sysfs_emit(buf, "%lu\n", READ_ONCE(s->nr_freed_pages));
+}
+SLAB_ATTR_RO(deallocated_pages);
+
 static ssize_t slabs_cpu_partial_show(struct kmem_cache *s, char *buf)
 {
 	int objects = 0;
@@ -6169,6 +6177,7 @@ static struct attribute *slab_attrs[] = {
 	&cpu_partial_attr.attr,
 	&objects_attr.attr,
 	&objects_partial_attr.attr,
+	&deallocated_pages_attr.attr,
 	&partial_attr.attr,
 	&cpu_slabs_attr.attr,
 	&ctor_attr.attr,

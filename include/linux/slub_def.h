@@ -98,6 +98,7 @@ struct kmem_cache {
 	struct kmem_cache_order_objects min;
 
 	struct kmem_cache_order_objects oo;
+	unsigned long nr_freed_pages;
 	struct list_head freed_slabs_normal;
 	struct list_head freed_slabs_min;
 	spinlock_t freed_slabs_lock;
