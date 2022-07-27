@@ -1719,8 +1719,13 @@ static __always_inline void kfree_hook(void *x)
 }
 
 static __always_inline bool slab_free_hook(struct kmem_cache *s,
-						void *x, bool init)
+						void *x)
 {
+	/*
+	 * Note that slab_want_init_on_free() is normally compile-time-false,
+	 * so checks based on it can be compiled out.
+	 */
+	bool init = slab_want_init_on_free(s) && !is_kfence_address(x);
 	kmemleak_free_recursive(x, s->flags);
 
 	debug_check_no_locks_freed(x, s->object_size);
@@ -1752,50 +1757,6 @@ static __always_inline bool slab_free_hook(struct kmem_cache *s,
 	}
 	/* KASAN might put x into memory quarantine, delaying its reuse. */
 	return kasan_slab_free(s, x, init);
-}
-
-static inline bool slab_free_freelist_hook(struct kmem_cache *s,
-					   void **head, void **tail,
-					   int *cnt)
-{
-
-	void *object;
-	void *next = *head;
-	void *old_tail = *tail ? *tail : *head;
-
-	if (is_kfence_address(next)) {
-		slab_free_hook(s, next, false);
-		return true;
-	}
-
-	/* Head and tail of the reconstructed freelist */
-	*head = NULL;
-	*tail = NULL;
-
-	do {
-		object = next;
-		next = get_freepointer(s, object);
-
-		/* If object's reuse doesn't have to be delayed */
-		if (!slab_free_hook(s, object, slab_want_init_on_free(s))) {
-			/* Move object to the new freelist */
-			set_freepointer(s, object, *head);
-			*head = object;
-			if (!*tail)
-				*tail = object;
-		} else {
-			/*
-			 * Adjust the reconstructed freelist depth
-			 * accordingly if object's reuse is delayed.
-			 */
-			--(*cnt);
-		}
-	} while (object != old_tail);
-
-	if (*head == *tail)
-		*tail = NULL;
-
-	return *head != NULL;
 }
 
 static void *setup_object(struct kmem_cache *s, void *object)
@@ -3526,15 +3487,12 @@ redo:
 }
 
 static __always_inline void slab_free(struct kmem_cache *s, struct slab *slab,
-				      void *head, void *tail, int cnt,
-				      unsigned long addr)
+				      void *object, unsigned long addr)
 {
-	/*
-	 * With KASAN enabled slab_free_freelist_hook modifies the freelist
-	 * to remove objects, whose reuse must be delayed.
-	 */
-	if (slab_free_freelist_hook(s, &head, &tail, &cnt))
-		do_slab_free(s, slab, head, tail, cnt, addr);
+	if (slab_free_hook(s, object))
+		return;
+
+	do_slab_free(s, slab, object, NULL, 1, addr);
 }
 
 #ifdef CONFIG_KASAN_GENERIC
@@ -3550,7 +3508,7 @@ void kmem_cache_free(struct kmem_cache *s, void *x)
 	if (!s)
 		return;
 	trace_kmem_cache_free(_RET_IP_, x, s->name);
-	slab_free(s, virt_to_slab(x), x, NULL, 1, _RET_IP_);
+	slab_free(s, virt_to_slab(x), x, _RET_IP_);
 }
 EXPORT_SYMBOL(kmem_cache_free);
 
@@ -3624,8 +3582,12 @@ int build_detached_freelist(struct kmem_cache *s, size_t size,
 		df->s = cache_from_obj(s, object); /* Support for memcg */
 	}
 
+	if (slab_free_hook(df->s, object)) {
+		p[size] = NULL; /* mark object processed */
+		return size;
+	}
+
 	if (is_kfence_address(object)) {
-		slab_free_hook(df->s, object, false);
 		__kfence_free(object);
 		p[size] = NULL; /* mark object processed */
 		return size;
@@ -3646,6 +3608,11 @@ int build_detached_freelist(struct kmem_cache *s, size_t size,
 
 		/* df->slab is always set at this point */
 		if (df->slab == virt_to_slab(object)) {
+			if (slab_free_hook(df->s, object)) {
+				p[size] = NULL; /* mark object processed */
+				continue;
+			}
+
 			/* Opportunity build freelist */
 			set_freepointer(df->s, object, df->freelist);
 			df->freelist = object;
@@ -3680,7 +3647,8 @@ void kmem_cache_free_bulk(struct kmem_cache *s, size_t size, void **p)
 		if (!df.slab)
 			continue;
 
-		slab_free(df.s, df.slab, df.freelist, df.tail, df.cnt, _RET_IP_);
+		do_slab_free(df.s, df.slab, df.freelist, df.tail, df.cnt,
+			     _RET_IP_);
 	} while (likely(size));
 }
 EXPORT_SYMBOL(kmem_cache_free_bulk);
@@ -4581,7 +4549,7 @@ void kfree(const void *x)
 		return;
 	}
 	slab = folio_slab(folio);
-	slab_free(slab->slab_cache, slab, object, NULL, 1, _RET_IP_);
+	slab_free(slab->slab_cache, slab, object, _RET_IP_);
 }
 EXPORT_SYMBOL(kfree);
 
