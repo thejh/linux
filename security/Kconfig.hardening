@@ -349,6 +349,25 @@ config GCC_PLUGIN_RANDSTRUCT
 	   * https://grsecurity.net/
 	   * https://pax.grsecurity.net/
 
+config SLAB_VIRTUAL
+	bool "Allocate slab objects from virtual memory"
+	depends on BROKEN # will be removed later in the series
+	depends on SLUB
+	depends on DEBUG_VIRTUAL # for now
+	# if KFENCE support is desired, it could be implemented on top of our
+	# virtual memory allocation facilities
+	depends on !KFENCE
+	# ASAN support will require that shadow memory is allocated
+	# appropriately.
+	depends on !KASAN
+	help
+	  Allocate slab objects from kernel-virtual memory, and ensure that
+	  virtual memory used as a slab cache is never reused to store
+	  objects from other slab caches or non-slab data.
+
+	  This is experimental and likely comes with noticeable performance
+	  impact.
+
 config KMALLOC_SPLIT_VARSIZE
   bool "Use separate caches for kmalloc() allocations having variable size"
   depends on (SLAB || SLUB) && !SLAB_MERGE_DEFAULT
