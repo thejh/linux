@@ -5,9 +5,32 @@
  * Internal slab definitions
  */
 
+/*
+ * Word size structure that can be atomically updated or read and that
+ * contains both the order and the number of objects that a slab of the
+ * given order would contain.
+ */
+struct kmem_cache_order_objects {
+	unsigned int x;
+};
+
 /* Reuses the bits in struct page */
 struct slab {
+#if 1
+	struct slab *compound_slab_head;
+	struct folio *backing_folio; /* protected by slub_kworker_lock */
+	/*unsigned int order;*/
+	struct kmem_cache_order_objects oo;
+	spinlock_t slab_lists_lock;
+	struct list_head flush_list_elem;
+
+	/*
+	 * TODO include explicit pointer to data mapping to avoid arithmetic
+	 * here?
+	 */
+#else
 	unsigned long __page_flags;
+#endif
 
 #if defined(CONFIG_SLAB)
 
@@ -23,6 +46,7 @@ struct slab {
 #elif defined(CONFIG_SLUB)
 
 	union {
+		// when physically-freed: entry on freed_slabs list
 		struct list_head slab_list;
 		struct rcu_head rcu_head;
 #ifdef CONFIG_SLUB_CPU_PARTIAL
@@ -34,6 +58,7 @@ struct slab {
 	};
 	struct kmem_cache *slab_cache;
 	/* Double-word boundary */
+	struct {
 	void *freelist;		/* first free object */
 	union {
 		unsigned long counters;
@@ -43,6 +68,7 @@ struct slab {
 			unsigned frozen:1;
 		};
 	};
+	} __attribute__((aligned(16)));
 	unsigned int __unused;
 
 #elif defined(CONFIG_SLOB)
@@ -57,12 +83,17 @@ struct slab {
 #error "Unexpected slab allocator configured"
 #endif
 
+#if 0
 	atomic_t __page_refcount;
+#endif
 #ifdef CONFIG_MEMCG
 	unsigned long memcg_data;
 #endif
 };
 
+static_assert(sizeof(struct slab) <= STRUCT_SLAB_SIZE);
+
+#if 0
 #define SLAB_MATCH(pg, sl)						\
 	static_assert(offsetof(struct page, pg) == offsetof(struct slab, sl))
 SLAB_MATCH(flags, __page_flags);
@@ -76,7 +107,12 @@ SLAB_MATCH(memcg_data, memcg_data);
 #endif
 #undef SLAB_MATCH
 static_assert(sizeof(struct slab) <= sizeof(struct page));
+#endif
 
+/* careful with this if you access the struct folio */
+#define slab_folio_unsafe(s) (s->backing_folio)
+
+#if 0
 /**
  * folio_slab - Converts from folio to slab.
  * @folio: The folio.
@@ -130,6 +166,14 @@ static_assert(sizeof(struct slab) <= sizeof(struct page));
  * struct slab.
  */
 #define slab_page(s) folio_page(slab_folio(s), 0)
+#endif
+
+#if 1
+struct slab *virt_to_slab(const void *kaddr);
+void *slab_to_virt(const struct slab *s);
+struct slab *virt_to_maybe_slab(const void *kaddr);
+struct folio *slab_get_folio(const struct slab *s);
+#endif
 
 /*
  * If network-based swap is enabled, sl*b must keep track of whether pages
@@ -137,52 +181,79 @@ static_assert(sizeof(struct slab) <= sizeof(struct page));
  */
 static inline bool slab_test_pfmemalloc(const struct slab *slab)
 {
-	return folio_test_active((struct folio *)slab_folio(slab));
+	// TODO
+	//return folio_test_active((struct folio *)slab_folio(slab));
+	return false;
 }
 
 static inline void slab_set_pfmemalloc(struct slab *slab)
 {
-	folio_set_active(slab_folio(slab));
+	// TODO
+	//folio_set_active(slab_folio(slab));
 }
 
 static inline void slab_clear_pfmemalloc(struct slab *slab)
 {
-	folio_clear_active(slab_folio(slab));
+	// TODO
+	//folio_clear_active(slab_folio(slab));
 }
 
 static inline void __slab_clear_pfmemalloc(struct slab *slab)
 {
-	__folio_clear_active(slab_folio(slab));
+	// TODO
+	//__folio_clear_active(slab_folio(slab));
 }
 
 static inline void *slab_address(const struct slab *slab)
 {
-	return folio_address(slab_folio(slab));
+	return slab_to_virt(slab);
+	//return folio_address(slab_folio(slab));
 }
 
 static inline int slab_nid(const struct slab *slab)
 {
-	return folio_nid(slab_folio(slab));
+	return folio_nid(slab_folio_unsafe(slab));
 }
 
 static inline pg_data_t *slab_pgdat(const struct slab *slab)
 {
-	return folio_pgdat(slab_folio(slab));
+	return folio_pgdat(slab_folio_unsafe(slab));
 }
 
+#if 0
 static inline struct slab *virt_to_slab(const void *addr)
 {
-	struct folio *folio = virt_to_folio(addr);
+	struct folio *folio;
+
+	folio = virt_to_folio(addr);
 
 	if (!folio_test_slab(folio))
 		return NULL;
 
 	return folio_slab(folio);
 }
+#endif
+
+#define OO_SHIFT	16
+#define OO_MASK		((1 << OO_SHIFT) - 1)
+
+static inline unsigned int oo_order(struct kmem_cache_order_objects x)
+{
+	return x.x >> OO_SHIFT;
+}
+
+static inline unsigned int oo_objects(struct kmem_cache_order_objects x)
+{
+	return x.x & OO_MASK;
+}
 
 static inline int slab_order(const struct slab *slab)
 {
+#if 0
 	return folio_order((struct folio *)slab_folio(slab));
+#else
+	return oo_order(slab->oo);
+#endif
 }
 
 static inline size_t slab_size(const struct slab *slab)
