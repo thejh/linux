@@ -39,6 +39,7 @@
 #include <linux/memcontrol.h>
 #include <linux/random.h>
 #include <linux/kthread.h>
+#include <linux/io.h>
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include <kunit/test.h>
@@ -407,6 +408,7 @@ retry_locked:
 
 	slab = (struct slab *)meta_range_start;
 	spin_lock_init(&slab->slab_lists_lock);
+	atomic_set(&slab->pinstate, SLAB_PINSTATE_UNPOPULATED);
 
 	return (struct slab *)meta_range_start;
 }
@@ -2027,6 +2029,26 @@ static void *setup_object(struct kmem_cache *s, void *object)
  * Slab allocation and freeing
  */
 
+static bool is_slab_pinned(struct slab *slab)
+{
+	int pinstate = atomic_read(&slab->pinstate);
+
+	WARN_ON(pinstate != SLAB_PINSTATE_UNPOPULATED &&
+		pinstate != SLAB_PINSTATE_PINNED);
+	return pinstate == SLAB_PINSTATE_PINNED;
+}
+
+/* racy: can transition from POPULATED to PINNED */
+static bool is_slab_pinned_racy(struct slab *slab)
+{
+	int pinstate = atomic_read(&slab->pinstate);
+
+	WARN_ON(pinstate != SLAB_PINSTATE_UNPOPULATED &&
+		pinstate != SLAB_PINSTATE_PINNED &&
+		pinstate != SLAB_PINSTATE_POPULATED);
+	return pinstate == SLAB_PINSTATE_PINNED;
+}
+
 /* Get an unused slab, or allocate a new one */
 static struct slab *get_slab(struct kmem_cache *s,
 	struct list_head *freed_slabs, struct kmem_cache_order_objects oo,
@@ -2040,8 +2062,9 @@ static struct slab *get_slab(struct kmem_cache *s,
 
 	if (likely(slab)) {
 		list_del(&slab->slab_list);
-		WRITE_ONCE(s->nr_freed_pages,
-			s->nr_freed_pages - (1UL<<slab_order(slab)));
+		if (!is_slab_pinned(slab))
+			WRITE_ONCE(s->nr_freed_pages,
+				s->nr_freed_pages - (1UL<<slab_order(slab)));
 
 		spin_unlock_irqrestore(&s->freed_slabs_lock, flags);
 		return slab;
@@ -2073,33 +2096,38 @@ static struct slab *alloc_slab_pv_page(struct kmem_cache *s,
 	slab = get_slab(s, freed_slabs, oo, meta_gfp_flags);
 
 	/* Get a corresponding physical page. */
-	/*
-	 * Avoid making UAF reads easily exploitable by repopulating
-	 * with pages containing attacker-controller data - always zero
-	 * pages.
-	 */
-	gfp_flags |= __GFP_ZERO;
-	if (node == NUMA_NO_NODE)
-		folio = (struct folio *)alloc_pages(gfp_flags, oo_order(oo));
-	else
-		folio = (struct folio *)__alloc_pages_node(node, gfp_flags, oo_order(oo));
+	if (!is_slab_pinned(slab)) {
+		/*
+		 * Avoid making UAF reads easily exploitable by repopulating
+		 * with pages containing attacker-controller data - always zero
+		 * pages.
+		 */
+		gfp_flags |= __GFP_ZERO;
+		if (node == NUMA_NO_NODE)
+			folio = (struct folio *)alloc_pages(gfp_flags, oo_order(oo));
+		else
+			folio = (struct folio *)__alloc_pages_node(node, gfp_flags, oo_order(oo));
 
-	if (!folio) {
-		/* Rollback: put the struct slab back. */
-		spin_lock_irqsave(&s->freed_slabs_lock, flags);
-		list_add(&slab->slab_list, freed_slabs);
-		spin_unlock_irqrestore(&s->freed_slabs_lock, flags);
+		if (!folio) {
+			/* Rollback: put the struct slab back. */
+			spin_lock_irqsave(&s->freed_slabs_lock, flags);
+			list_add(&slab->slab_list, freed_slabs);
+			spin_unlock_irqrestore(&s->freed_slabs_lock, flags);
 
-		return NULL;
+			return NULL;
+		}
+		folio->slab = slab;
+		__folio_set_slab(folio);
+
+		slab->backing_folio = folio;
+		slab->oo = oo;
+		if (unlikely(page_is_pfmemalloc(folio_page(folio, 0))))
+			slab_set_pfmemalloc(slab);
+		else
+			slab_clear_pfmemalloc(slab);
+	} else {
+		folio = slab->backing_folio;
 	}
-	__folio_set_slab(folio);
-
-	slab->backing_folio = folio;
-	slab->oo = oo;
-	if (unlikely(page_is_pfmemalloc(folio_page(folio, 0))))
-		slab_set_pfmemalloc(slab);
-	else
-		slab_clear_pfmemalloc(slab);
 
 	virt_mapping = slab_to_virt(slab);
 
@@ -2110,6 +2138,9 @@ static struct slab *alloc_slab_pv_page(struct kmem_cache *s,
 		BUG_ON(pte_present(*ptep));
 		set_pte_safe(ptep, mk_pte(folio_page(folio, i), PAGE_KERNEL));
 	}
+
+	if (!is_slab_pinned(slab))
+		atomic_set(&slab->pinstate, SLAB_PINSTATE_POPULATED);
 
 	return slab;
 }
@@ -2125,6 +2156,96 @@ struct page *virt_to_head_page_noderef(void *virt_ptr)
 		return virt_to_head_page(virt_ptr);
 	}
 }
+
+unsigned long slab_virt_to_phys(unsigned long x)
+{
+	struct slab *slab = virt_to_slab((void*)x);
+	struct folio *f = slab_folio_unsafe(slab);
+
+	if (!is_slab_pinned_racy(slab)) {
+		int cx_ret = atomic_cmpxchg(&slab->pinstate,
+					    SLAB_PINSTATE_POPULATED,
+					    SLAB_PINSTATE_PINNED);
+		if (CHECK_DATA_CORRUPTION(cx_ret != SLAB_PINSTATE_POPULATED &&
+					  cx_ret != SLAB_PINSTATE_PINNED,
+					  "trying to pin unpopulated slab (cx_ret=0x%x)",
+					  (unsigned int)cx_ret)) {
+			/* this is going to crash, no way around it, we're
+			 * trying to do a virt-to-phys conversion of virtual
+			 * memory that has no physical page */
+			BUG();
+		}
+	}
+
+	return page_to_phys(folio_page(f, 0)) + (x - (unsigned long)slab_to_virt(slab));
+}
+EXPORT_SYMBOL(slab_virt_to_phys);
+
+/*
+ * What makes this extra fun is that we could theoretically legitimately end up
+ * in here while racing with __slab_free() if we're here via something like
+ * /dev/mem.
+ *
+ * To address this properly, we'd probably need callers to tell us whether
+ * they're just poking around in random kernel memory for fun, and then just
+ * give those callers the address of the physmap alias.
+ *
+ * But for now, this uses the gnarly "do the lookup one way, stabilize, do the
+ * reverse lookup" pattern.
+ *
+ * The caller guarantees that this page had a head that, shortly afterwards,
+ * was a slab folio; but that doesn't really mean a lot.
+ *
+ * This is ugly as heck and may or may not need some more memory barriers
+ * peppered in to be correct on non-X86.
+ */
+void *slab_phys_to_virt(unsigned long phys)
+{
+	struct page *p = pfn_to_page(PFN_DOWN(phys));
+	struct folio *f = page_folio(p); /* racy, folio might detach */
+	/* might be reading non-live union field, could be mapping or compound
+	 * mapcount/pincount! */
+	unsigned long slab_raw = (unsigned long)READ_ONCE(f->slab);
+	struct slab *slab;
+	int slab_pinstate;
+	size_t page_idx;
+
+	if (slab_raw < SLAB_BASE_ADDR || slab_raw >= SLAB_DATA_BASE_ADDR ||
+			(slab_raw - SLAB_BASE_ADDR) % STRUCT_SLAB_SIZE != 0)
+		goto not_slab;
+	slab = (struct slab *)slab_raw;
+	slab_pinstate = atomic_read(&slab->pinstate);
+	if (slab_pinstate != SLAB_PINSTATE_POPULATED &&
+	    slab_pinstate != SLAB_PINSTATE_PINNED)
+		goto not_slab;
+
+	/* ensure the target page was really part of the compound page */
+	page_idx = p - folio_page(f, 0);
+	if (p - folio_page(f, 0) >= slab->oo.x)
+		goto not_slab;
+
+	/* try to pin the slab to make the translation stable */
+	slab_pinstate = atomic_cmpxchg(&slab->pinstate, SLAB_PINSTATE_POPULATED,
+				       SLAB_PINSTATE_PINNED);
+	if (slab_pinstate != SLAB_PINSTATE_POPULATED &&
+	    slab_pinstate != SLAB_PINSTATE_PINNED)
+		goto not_slab;
+
+	/* check the reverse translation now that we have something stable */
+	if (slab->backing_folio != f)
+		goto not_slab;
+
+	/*
+	 * Alright, we're sure we can translate this into a SLUB-virtual
+	 * address at this point.
+	 */
+	return slab_to_virt(slab) + PAGE_SIZE * page_idx + offset_in_page(phys);
+
+not_slab:
+	pr_warn("%s(0x%lx): decided not slab (racy?)\n", __func__, phys);
+	return (void*)(phys + PAGE_OFFSET);
+}
+EXPORT_SYMBOL(slab_phys_to_virt);
 
 int slab_mem_nid(void *virt_ptr)
 {
@@ -2356,10 +2477,12 @@ static void slub_tlbflush_worker(struct kthread_work *work)
 		struct kmem_cache *s = slab->slab_cache;
 
 		list_del(&slab->flush_list_elem);
-		__folio_clear_slab(folio);
-		folio->mapping = NULL;
-		slab->backing_folio = NULL;
-		__free_pages(folio_page(folio, 0), oo_order(slab->oo));
+		if (!is_slab_pinned(slab)) {
+			__folio_clear_slab(folio);
+			folio->mapping = NULL;
+			slab->backing_folio = NULL;
+			__free_pages(folio_page(folio, 0), oo_order(slab->oo));
+		}
 
 		// TODO put slab on list to reuse virtual memory
 		// IRQs are already off
@@ -2371,7 +2494,8 @@ static void slub_tlbflush_worker(struct kthread_work *work)
 			WARN_ON(oo_order(slab->oo) != oo_order(s->oo));
 			list_add(&slab->slab_list, &s->freed_slabs_normal);
 		}
-		WRITE_ONCE(s->nr_freed_pages, s->nr_freed_pages + (1UL<<slab_order(slab)));
+		if (!is_slab_pinned(slab))
+			WRITE_ONCE(s->nr_freed_pages, s->nr_freed_pages + (1UL<<slab_order(slab)));
 		spin_unlock(&s->freed_slabs_lock);
 	}
 	spin_unlock_irqrestore(&slub_kworker_lock, irq_flags);
@@ -2391,6 +2515,10 @@ static void __free_slab(struct kmem_cache *s, struct slab *slab)
 		for_each_object(p, s, slab_address(slab), slab->objects)
 			check_object(s, slab, p, SLUB_RED_INACTIVE);
 	}
+
+	/* Mark the slab as unpopulated unless it was pinned. */
+	atomic_cmpxchg(&slab->pinstate, SLAB_PINSTATE_POPULATED,
+		       SLAB_PINSTATE_UNPOPULATED);
 
 	for (unsigned long i = 0; i < (1UL << oo_order(slab->oo)); i++) {
 		unsigned long addr = (unsigned long)slab_address(slab) + i*PAGE_SIZE;
