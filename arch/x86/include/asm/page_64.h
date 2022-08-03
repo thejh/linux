@@ -31,6 +31,10 @@ static __always_inline unsigned long __phys_addr_nodebug(unsigned long x)
 #ifdef CONFIG_DEBUG_VIRTUAL
 extern unsigned long __phys_addr(unsigned long);
 extern unsigned long __phys_addr_symbol(unsigned long);
+void *__virt_addr(unsigned long);
+#ifndef __va /* overridden in boot code */
+#define __va(x) __virt_addr((unsigned long)(x))
+#endif
 #else
 #define __phys_addr(x)		__phys_addr_nodebug(x)
 #define __phys_addr_symbol(x) \
