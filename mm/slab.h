@@ -24,6 +24,11 @@ struct slab {
 	spinlock_t slab_lists_lock;
 	struct list_head flush_list_elem;
 
+#define SLAB_PINSTATE_UNPOPULATED 0x40
+#define SLAB_PINSTATE_POPULATED 0x41
+#define SLAB_PINSTATE_PINNED 0x42
+	atomic_t pinstate;
+
 	/*
 	 * TODO include explicit pointer to data mapping to avoid arithmetic
 	 * here?

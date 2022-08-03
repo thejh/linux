@@ -12,9 +12,17 @@
 #ifdef CONFIG_X86_64
 
 #ifdef CONFIG_DEBUG_VIRTUAL
+#ifdef CONFIG_SLAB_VIRTUAL
+unsigned long slab_virt_to_phys(unsigned long x);
+void *slab_phys_to_virt(unsigned long x);
+#endif
+
 unsigned long __phys_addr(unsigned long x)
 {
 	unsigned long y = x - __START_KERNEL_map;
+
+	if (is_slab_addr(x))
+		return slab_virt_to_phys(x);
 
 	/* use the carry flag to determine if x was < __START_KERNEL_map */
 	if (unlikely(x > y)) {
@@ -42,6 +50,30 @@ unsigned long __phys_addr_symbol(unsigned long x)
 	return y + phys_base;
 }
 EXPORT_SYMBOL(__phys_addr_symbol);
+
+void *__virt_addr(unsigned long x)
+{
+#ifdef CONFIG_SLAB_VIRTUAL
+	struct page *p;
+	struct folio *f;
+
+	/* dirty hack because enum slab_state is not visible here.
+	 * checking kmalloc_caches[0][1] isn't really the right thing to do
+	 * here; we need at least something that ensures that struct page is
+	 * available at this point. or we add a new version of __va() for cases
+	 * where a struct page might not (yet) exist.
+	 */
+	if (kmalloc_caches[0][1] != NULL) {
+		p = pfn_to_page(PFN_DOWN(x));
+		f = page_folio(p);
+		if (unlikely(folio_test_slab(f)))
+			return slab_phys_to_virt(x);
+	}
+#endif
+
+	return (void*)(x + PAGE_OFFSET);
+}
+EXPORT_SYMBOL(__virt_addr);
 #endif
 
 bool __virt_addr_valid(unsigned long x)
