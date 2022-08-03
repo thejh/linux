@@ -29,6 +29,7 @@
 
 struct address_space;
 struct mem_cgroup;
+struct slab;
 
 /*
  * Each physical page in the system has a struct page associated with
@@ -265,7 +266,10 @@ struct folio {
 				};
 	/* public: */
 			};
-			struct address_space *mapping;
+			union {
+				struct address_space *mapping;
+				struct slab *slab;
+			};
 			pgoff_t index;
 			void *private;
 			atomic_t _mapcount;
