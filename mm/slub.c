@@ -615,7 +615,8 @@ static inline freeptr_t freelist_ptr_encode(const struct kmem_cache *s,
 }
 
 static inline void *freelist_ptr_decode(const struct kmem_cache *s,
-					freeptr_t ptr, unsigned long ptr_addr)
+					freeptr_t ptr, unsigned long ptr_addr,
+					struct slab *slab)
 {
 #ifdef CONFIG_SLAB_FREELIST_HARDENED
 	/*
@@ -637,16 +638,17 @@ static inline void *freelist_ptr_decode(const struct kmem_cache *s,
 
 /* Returns the freelist pointer recorded at location ptr_addr. */
 static inline void *freelist_dereference(const struct kmem_cache *s,
-					 void *ptr_addr)
+					 void *ptr_addr, struct slab *slab)
 {
 	return freelist_ptr_decode(s, *(freeptr_t*)(ptr_addr),
-				   (unsigned long)ptr_addr);
+				   (unsigned long)ptr_addr, slab);
 }
 
-static inline void *get_freepointer(struct kmem_cache *s, void *object)
+static inline void *get_freepointer(struct kmem_cache *s, void *object,
+				    struct slab *slab)
 {
 	object = kasan_reset_tag(object);
-	return freelist_dereference(s, (freeptr_t*)(object + s->offset));
+	return freelist_dereference(s, (freeptr_t*)(object + s->offset), slab);
 }
 
 static void prefetch_freepointer(const struct kmem_cache *s, void *object)
@@ -665,18 +667,18 @@ static void prefetch_freepointer(const struct kmem_cache *s, void *object)
  * get_freepointer_safe() returns initialized memory.
  */
 __no_kmsan_checks
-static inline void *get_freepointer_safe(struct kmem_cache *s, void *object)
+static inline freeptr_t get_freepointer_safe(struct kmem_cache *s, void *object)
 {
 	unsigned long freepointer_addr;
 	freeptr_t p;
 
 	if (!debug_pagealloc_enabled_static())
-		return get_freepointer(s, object);
+		return *(freeptr_t*)freepointer_addr;
 
 	object = kasan_reset_tag(object);
 	freepointer_addr = (unsigned long)object + s->offset;
 	copy_from_kernel_nofault(&p, (freeptr_t*)freepointer_addr, sizeof(p));
-	return freelist_ptr_decode(s, p, freepointer_addr);
+	return p;
 }
 
 static inline void set_freepointer(struct kmem_cache *s, void *object, void *fp)
@@ -860,7 +862,7 @@ static void __fill_map(unsigned long *obj_map, struct kmem_cache *s,
 
 	bitmap_zero(obj_map, slab->objects);
 
-	for (p = slab->freelist; p; p = get_freepointer(s, p))
+	for (p = slab->freelist; p; p = get_freepointer(s, p, slab))
 		set_bit(__obj_to_index(s, addr, p), obj_map);
 }
 
@@ -1152,7 +1154,7 @@ static void print_trailer(struct kmem_cache *s, struct slab *slab, u8 *p)
 	print_slab_info(slab);
 
 	pr_err("Object 0x%p @offset=%tu fp=0x%p\n\n",
-	       p, p - addr, get_freepointer(s, p));
+	       p, p - addr, get_freepointer(s, p, slab));
 
 	if (s->flags & SLAB_RED_ZONE)
 		print_section(KERN_ERR, "Redzone  ", p - s->red_left_pad,
@@ -1422,7 +1424,7 @@ static int check_object(struct kmem_cache *s, struct slab *slab,
 		return 1;
 
 	/* Check free pointer validity */
-	if (!check_valid_pointer(s, slab, get_freepointer(s, p))) {
+	if (!check_valid_pointer(s, slab, get_freepointer(s, p, slab))) {
 		object_err(s, slab, p, "Freepointer corrupt");
 		/*
 		 * No choice but to zap it and thus lose the remainder
@@ -1492,7 +1494,7 @@ static int on_freelist(struct kmem_cache *s, struct slab *slab, void *search)
 			break;
 		}
 		object = fp;
-		fp = get_freepointer(s, object);
+		fp = get_freepointer(s, object, slab);
 		nr++;
 	}
 
@@ -2626,7 +2628,7 @@ static void *alloc_single_from_partial(struct kmem_cache *s,
 	lockdep_assert_held(&n->list_lock);
 
 	object = slab->freelist;
-	slab->freelist = get_freepointer(s, object);
+	slab->freelist = get_freepointer(s, object, slab);
 	slab->inuse++;
 
 	if (!alloc_debug_processing(s, slab, object, orig_size)) {
@@ -2657,7 +2659,7 @@ static void *alloc_single_from_new_slab(struct kmem_cache *s,
 
 
 	object = slab->freelist;
-	slab->freelist = get_freepointer(s, object);
+	slab->freelist = get_freepointer(s, object, slab);
 	slab->inuse = 1;
 
 	if (!alloc_debug_processing(s, slab, object, orig_size))
@@ -2980,7 +2982,7 @@ static void deactivate_slab(struct kmem_cache *s, struct slab *slab,
 	freelist_tail = NULL;
 	freelist_iter = freelist;
 	while (freelist_iter) {
-		nextfree = get_freepointer(s, freelist_iter);
+		nextfree = get_freepointer(s, freelist_iter, slab);
 
 		/*
 		 * If 'nextfree' is invalid, it is possible that the object at
@@ -3425,7 +3427,7 @@ next_object:
 
 	/* Reached end of constructed freelist yet? */
 	if (object != tail) {
-		object = get_freepointer(s, object);
+		object = get_freepointer(s, object, slab);
 		goto next_object;
 	}
 	checks_ok = true;
@@ -3677,7 +3679,7 @@ load_freelist:
 	 * That slab must be frozen for per cpu allocations to work.
 	 */
 	VM_BUG_ON(!c->slab->frozen);
-	c->freelist = get_freepointer(s, freelist);
+	c->freelist = get_freepointer(s, freelist, c->slab);
 	c->tid = next_tid(c->tid);
 	local_unlock_irqrestore(&s->cpu_slab->lock, flags);
 	return freelist;
@@ -3779,7 +3781,7 @@ check_new_slab:
 		 * For !pfmemalloc_match() case we don't load freelist so that
 		 * we don't make further mismatched allocations easier.
 		 */
-		deactivate_slab(s, slab, get_freepointer(s, freelist));
+		deactivate_slab(s, slab, get_freepointer(s, freelist, slab));
 		return freelist;
 	}
 
@@ -3913,7 +3915,10 @@ redo:
 	    unlikely(!object || !slab || !node_match(slab, node))) {
 		object = __slab_alloc(s, gfpflags, node, addr, c, orig_size);
 	} else {
-		void *next_object = get_freepointer_safe(s, object);
+		void *next_object;
+		freeptr_t next_encoded = get_freepointer_safe(s, object);
+		next_object = freelist_ptr_decode(s, next_encoded,
+				(unsigned long)kasan_reset_tag(object) + s->offset, slab);
 
 		/*
 		 * The cmpxchg will only match if there was no additional
@@ -4389,7 +4394,7 @@ int kmem_cache_alloc_bulk(struct kmem_cache *s, gfp_t flags, size_t size,
 
 			continue; /* goto for-loop */
 		}
-		c->freelist = get_freepointer(s, object);
+		c->freelist = get_freepointer(s, object, c->slab);
 		p[i] = object;
 		maybe_wipe_obj_freeptr(s, p[i]);
 	}
@@ -4618,7 +4623,7 @@ static void early_kmem_cache_node_alloc(int node)
 	init_tracking(kmem_cache_node, n);
 #endif
 	n = kasan_slab_alloc(kmem_cache_node, n, GFP_KERNEL, false);
-	slab->freelist = get_freepointer(kmem_cache_node, n);
+	slab->freelist = get_freepointer(kmem_cache_node, n, slab);
 	slab->inuse = 1;
 	kmem_cache_node->node[node] = n;
 	init_kmem_cache_node(n);
