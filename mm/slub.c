@@ -598,6 +598,12 @@ static inline void *freelist_ptr_decode(const struct kmem_cache *s,
 					struct slab *slab)
 {
 #ifdef CONFIG_SLAB_FREELIST_HARDENED
+	void *decoded;
+	/* TODO: maybe let slab_to_virt load a virtual address from
+	 * struct slab instead of using arithmetic for the translation?
+	 */
+	unsigned long slab_base = (unsigned long)slab_to_virt(slab);
+
 	/*
 	 * When CONFIG_KASAN_SW/HW_TAGS is enabled, ptr_addr might be tagged.
 	 * Normally, this doesn't cause any issues, as both set_freepointer()
@@ -608,8 +614,34 @@ static inline void *freelist_ptr_decode(const struct kmem_cache *s,
 	 * calls get_freepointer() with an untagged pointer, which causes the
 	 * freepointer to be restored incorrectly.
 	 */
-	return (void *)(ptr.v ^ s->random ^
+	decoded = (void *)(ptr.v ^ s->random ^
 			swab((unsigned long)kasan_reset_tag((void *)ptr_addr)));
+
+	/*
+	 * This verifies that the SLUB freepointer does not point outside the
+	 * slab. Since at that point we can basically do it for free, it also
+	 * checks that the pointer alignment looks vaguely sane.
+	 * However, we probably don't want the cost of a proper division here,
+	 * so instead we just do a cheap check whether the bottom bits that are
+	 * clear in the size are also clear in the pointer.
+	 * So for kmalloc-32, it does a perfect alignment check, but for
+	 * kmalloc-192, it just checks that the pointer is a multiple of 32.
+	 * This should probably be reconsidered - is this a good tradeoff, or
+	 * should that part be thrown out, or do we want a proper accurate
+	 * alignment check (and can we make it work with acceptable performance
+	 * cost compared to the security improvement - probably not)?
+	 *
+	 * NULL freepointer must be special-cased.
+	 * Write it in a way that gives the compiler a chance to avoid adding
+	 * an unpredictable branch.
+	 */
+	slab_base = decoded ? slab_base : 0;
+	if (CHECK_DATA_CORRUPTION(
+			((unsigned long)decoded & slab->align_mask) != slab_base,
+			"bad freeptr (encoded %lx, ptr %px, base %lx, mask %lx",
+			ptr.v, decoded, slab_base, slab->align_mask))
+		return NULL;
+	return decoded;
 #else
 	return (void*)ptr.v;
 #endif
@@ -2092,6 +2124,19 @@ static struct slab *alloc_slab_pv_page(struct kmem_cache *s,
 		if (slab == NULL)
 			return NULL;
 		//pr_warn("alloc_slab_pv_page(%px/'%s'): allocated slab %px\n", s, s->name, slab);
+
+		/*
+		 * Bits that must be equal to start-of-slab address for all
+		 * objects inside the slab.
+		 * For compatibility with pointer tagging (like in HWASAN), this would
+		 * need to clear the pointer tag bits from the mask.
+		 */
+		slab->align_mask = ~((PAGE_SIZE<<oo_order(oo)) - 1);
+
+		/* object alignment bits (must be zero, which is equal to the bits in
+		 * the start-of-slab address) */
+		if (s->red_left_pad == 0)
+			slab->align_mask |= (1 << (ffs(s->size)-1)) - 1;
 	} else {
 		slab = list_first_entry(freed_slabs, struct slab, slab_list);
 		list_del(&slab->slab_list);
