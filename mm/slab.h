@@ -23,6 +23,12 @@ struct slab {
 	struct kmem_cache_order_objects oo;
 	spinlock_t slab_lists_lock;
 	struct list_head flush_list_elem;
+	/* not in kmem_cache because it depends on whether the allocation is
+	 * normal order or fallback order.
+	 * an alternative might be to over-allocate virtual memory for
+	 * fallback-order pages.
+	 */
+	unsigned long align_mask;
 
 #define SLAB_PINSTATE_UNPOPULATED 0x40
 #define SLAB_PINSTATE_POPULATED 0x41
