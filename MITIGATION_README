@@ -1,0 +1,173 @@
+== Summary ==
+This branch contains a Linux kernel with some experimental hardening.
+
+The patches on this branch do roughly the following:
+
+ - cleanup/refactor some SLUB code in preparation for following patches
+ - add CONFIG_KMALLOC_SPLIT_VARSIZE, which splits each kmalloc slab into one
+   for provably-fixed-size objects (using __builtin_constant_p()) and one for
+   other objects
+ - add CONFIG_SLAB_VIRTUAL, which:
+   - allocates SLUB objects from a dedicated virtual memory region
+   - ensures that slab virtual memory is never reused for a different slab
+   - handles virt_to_phys() and similar by falling back to making the mapping
+     between virtual and physical slab memory permanent
+   - add lightweight freelist pointer validation in freelist_ptr_decode() when
+     CONFIG_SLAB_FREELIST_HARDENED is active
+
+== Motivation ==
+Linux Kernel use-after-free vulnerabilities are commonly exploited by turning
+them into an object type confusion (having two active pointers of different
+types to the same memory location) using one of the following techniques:
+
+1. Direct object reuse: Let the kernel give the victim object back to the slab
+   allocator, then allocate the object again as a different type.
+2. "Cross-cache attacks": Let the kernel give the victim object back to the slab
+   allocator, let the slab allocator give the containing page back to the page
+   allocator, then either allocate the page directly as some other type of page
+   or let the slab allocator grab it for another kmem_cache and allocate an
+   object from there.
+
+Additionally, a use-after-free could also be used to generate type confusion
+between the victim object and an inline freelist pointer.
+
+For fixing case 1, grsecurity blogged
+(https://grsecurity.net/how_autoslab_changes_the_memory_unsafety_game) about a
+proprietary mitigation that creates individual slabs for specific object types.
+This is only worthwhile if the second case is also addressed; the grsecurity
+blogpost describes a combination of probabilistic mitigations for this.
+I wanted to try instead deterministically preventing the second case.
+
+== Addressing direct object reuse (case 1) ==
+The draft mitigation uses a fairly basic mitigation against direct object reuse:
+It adds a kernel config flag CONFIG_KMALLOC_SPLIT_VARSIZE that splits all
+kmalloc caches into two, one for allocations where the compiler can prove that
+the allocation is fixed-size and one for all other allocations.
+Compilers make it possible to distinguish these cases at compile time using the
+helper __builtin_constant_p(), which is already used by the current kmalloc()
+function.
+
+The idea here is to prevent the use of generic exploit techniques that make it
+possible to target all allocator size buckets at once with a single primitive;
+however, the granularity is likely far lower than what grsecurity's approach
+provides, and attackers will likely still be able to target fixed-size buckets
+by looking for objects with appropriate size and layout.
+We think the per-vulnerability effort required for exploitation will be
+significantly higher with the limited set of objects, but would love to learn
+otherwise.
+
+== Preventing slab memory reuse (case 2) ==
+In theory, there's an easy fix against cross-cache attacks:
+Modify the slab allocator such that it never gives back memory to the page
+allocator. In practice, that would be problematic; for example, the VFS code
+can fill a significant chunk of memory with dentry and inode data structures,
+and it should be possible to reclaim this memory somehow.
+
+For comparison, in userspace, PartitionAlloc
+(https://chromium.googlesource.com/chromium/src/+/master/base/allocator/partition_allocator/PartitionAlloc.md)
+works by forever reserving virtual memory for specific purposes, but giving the
+actual backing memory back to the OS when no allocated objects exist in a page.
+The draft mitigation involves making SLUB do the same thing.
+
+=== Memory usage impact: Increased memory usage ===
+Instead of reusing space in struct slab for storing slab metadata, this involves
+storing slab metadata in a separate virtual address region; and this metadata is
+not released when pages are given back to the page allocator.
+This will increase kernel memory usage somewhat, but probably not significantly;
+it would be most noticeable after a huge amount of objects has been allocated in
+one slab, then freed.
+
+=== Performance impact: 4K page mappings ===
+To be able to manage SLUB pages with individual virtual mappings, it is
+necessary to map SLUB memory through 4K PTEs. This means SLUB memory will be
+handled less efficiently in the CPUs TLB, and will require some additional
+memory for storing page tables.
+
+=== TLB flushes ===
+Kernel memory allocations sometimes happen in contexts where the kernel doesn't
+support performing TLB flushes. Therefore, SLUB memory is not unmapped from the
+linear mapping region.
+
+Similarly, the SLUB allocator can release pages in contexts where TLB flushes
+can't be performed; but for the mitigation to provide reliable protection, a TLB
+flush has to occur before the page is actually released.
+Therefore, when the SLUB allocator wants to release a page, it is first put on a
+list and then later actually freed from workqueue context.
+
+=== Virtual-to-physical and virtual-to-page conversions ===
+One hurdle with this is that many places in the kernel assume that memory
+returned from the slab allocator comes from the kernel's "direct mapping of all
+physical memory" area, and that it is acceptable to convert the addresses of
+slab objects to page pointers or physical addresses and back.
+
+The draft mitigation addresses this by hooking the virtual-to-physical and
+physical-to-virtual address conversion routines to map to and from SLUB virtual
+memory appropriately.
+Additionally, when the virtual-to-physical mapping function is used, the
+physical page is pinned forever, since the mitigation otherwise can't prevent
+use-after-frees in the physical address space.
+
+=== Possible performance impact: address conversion functions ===
+The virtual-to-physical and physical-to-virtual conversion functions are hot
+codepaths; adding extra logic in them for SLUB pages could have CPU usage
+impact.
+
+=== Physical contiguity requirement ===
+To ensure that code that assumes that SLUB allocations are physically contiguous
+keeps working, we have to keep allocating high-order pages for SLUB, rather than
+allocating lots of order-0 pages like vmalloc().
+
+=== Possible future optimizations of common virtual-to-physical conversions ===
+There are a few reasons why parts of the kernel perform virtual-to-physical or
+virtual-to-page conversions on memory from the page allocator:
+
+1. Because on 32-bit systems, kernel-virtual addresses can't be used to refer to
+   all memory - high memory is not associated with a fixed kernel-virtual
+   address.
+   For this reason, APIs like sglists that have to be able to handle high memory
+   represent references to memory using a page* and an offset into the page.
+   (But on 64-bit systems, I think there is no major reason why sglists couldn't
+   contain kernel-virtual addresses instead.)
+2. For interacting with hardware that operates on physical or bus addresses,
+   especially for DMA.
+3. Rarely, for inspecting properties of the struct page or the physical page -
+   for example, for checking which NUMA node a slab allocation resides on.
+
+For handling the first case without pinning memory, one option might be to
+introduce a new kernel type for referencing arbitrary memory that can be based
+on page+offset or kernel-virtual addresses depending on the platform; this might
+also help avoid unnecessary back-and-forth conversions between virtual and
+physical addresses on 64-bit in places like the cryptographic API.
+
+The second case is kind of messy. In the first place, it is kind of a bad idea
+to use SLUB allocations with the DMA API: When SLUB memory is directly mapped
+into IOMMUs, the mappings have to be implicitly widened to the IOMMU's page
+table granularity (typically 4KiB), which causes unrelated nearby SLUB memory to
+become visible to hardware devices. The Linux kernel by default only avoids this
+when dealing with Thunderbolt devices ("external_facing" in the kernel), while
+for other devices the security benefit of IOMMUs can essentially be nullified by
+DMA to SLUB objects. (See iommu_dma_map_page(): If iova_offset() says the start
+or end of the specified buffer aren't IOMMU-aligned AND dev_use_swiotlb() is
+true, a bounce buffer is used instead of directly mapping the specified page.
+But dev_use_swiotlb() is only true if dev_is_untrusted(), which is only true for
+PCI devices with the ->untrusted flag set, which is only set in
+set_pcie_untrusted() if either the parent device is also untrusted or the parent
+is an external port.)
+
+
+So with the overall goal in mind of preventing memory corruption in one place
+from spreading elsewhere, it's probably a bad idea to use the DMA APIs with SLUB
+memory at all; so it probably doesn't make much sense to optimize this pattern
+in a mitigation like this.
+
+== Design: Addressing freelist corruption ==
+To prevent an attacker from abusing a memory corruption inside a slab page to
+directly corrupt a SLAB freelist, and using that to make a SLUB allocation call
+return a pointer to other kernel memory, it would be desirable to have a
+freelist encoding that makes it impossible to address out-of-bounds memory; and
+ideally, it should also be impossible to make the allocator return unaligned
+pointers through freelist corruption.
+The draft mitigation doesn't reliably detect inappropriately aligned freelist
+pointers, since that would require an integer division somewhere; but it does
+bounds-check freelist pointers and do some coarse validation of freelist pointer
+alignment.
