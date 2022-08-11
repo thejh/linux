@@ -670,14 +670,13 @@ static void prefetch_freepointer(const struct kmem_cache *s, void *object)
 static inline freeptr_t get_freepointer_safe(struct kmem_cache *s, void *object,
 					 struct slab *slab)
 {
-	unsigned long freepointer_addr;
+	unsigned long freepointer_addr = (unsigned long)object + s->offset;
 	freeptr_t p;
 
 	if (!debug_pagealloc_enabled_static())
 		return *(freeptr_t*)freepointer_addr;
 
 	object = kasan_reset_tag(object);
-	freepointer_addr = (unsigned long)object + s->offset;
 	copy_from_kernel_nofault(&p, (freeptr_t*)freepointer_addr, sizeof(p));
 	return p;
 }
