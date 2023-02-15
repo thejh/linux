@@ -164,6 +164,7 @@ static inline void check_heap_object(const void *ptr, unsigned long n,
 	unsigned long addr = (unsigned long)ptr;
 	unsigned long offset;
 	struct folio *folio;
+	struct slab *slab;
 
 	if (is_kmap_addr(ptr)) {
 		offset = offset_in_page(ptr);
@@ -185,15 +186,22 @@ static inline void check_heap_object(const void *ptr, unsigned long n,
 		return;
 	}
 
+	slab = virt_to_maybe_slab(ptr);
+	if (slab) {
+		/* Check slab allocator for flags and size. */
+		__check_heap_object(ptr, n, slab, to_user);
+		return;
+	}
+
 	if (!virt_addr_valid(ptr))
 		return;
 
 	folio = virt_to_folio(ptr);
 
-	if (folio_test_slab(folio)) {
-		/* Check slab allocator for flags and size. */
-		__check_heap_object(ptr, n, folio_slab(folio), to_user);
-	} else if (folio_test_large(folio)) {
+	/* trying to address slab memory through linear mapping */
+	BUG_ON(folio_test_slab(folio));
+
+	if (folio_test_large(folio)) {
 		offset = ptr - folio_address(folio);
 		if (n > folio_size(folio) - offset)
 			usercopy_abort("page alloc", NULL, to_user, offset, n);
