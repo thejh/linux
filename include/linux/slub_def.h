@@ -76,15 +76,6 @@ struct kmem_cache_cpu {
 #endif // CONFIG_SLUB_CPU_PARTIAL
 
 /*
- * Word size structure that can be atomically updated or read and that
- * contains both the order and the number of objects that a slab of the
- * given order would contain.
- */
-struct kmem_cache_order_objects {
-	unsigned int x;
-};
-
-/*
  * Slab cache management.
  */
 struct kmem_cache {
@@ -102,10 +93,15 @@ struct kmem_cache {
 	/* Number of per cpu partial slabs to keep around */
 	unsigned int cpu_partial_slabs;
 #endif
-	struct kmem_cache_order_objects oo;
 
 	/* Allocation and freeing of slabs */
 	struct kmem_cache_order_objects min;
+
+	struct kmem_cache_order_objects oo;
+	struct list_head freed_slabs_normal;
+	struct list_head freed_slabs_min;
+	spinlock_t freed_slabs_lock;
+
 	gfp_t allocflags;	/* gfp flags to use on each alloc */
 	int refcount;		/* Refcount for slab cache destroy */
 	void (*ctor)(void *);

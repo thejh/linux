@@ -116,9 +116,18 @@ list_lru_from_kmem(struct list_lru *lru, int nid, void *ptr,
 }
 #endif /* CONFIG_MEMCG_KMEM */
 
+static int virt_nid(void *ptr)
+{
+	if (is_slab_addr(ptr)) {
+		return slab_mem_nid(ptr);
+	} else {
+		return page_to_nid(virt_to_page(ptr));
+	}
+}
+
 bool list_lru_add(struct list_lru *lru, struct list_head *item)
 {
-	int nid = page_to_nid(virt_to_page(item));
+	int nid = virt_nid(item);
 	struct list_lru_node *nlru = &lru->node[nid];
 	struct mem_cgroup *memcg;
 	struct list_lru_one *l;
@@ -142,7 +151,7 @@ EXPORT_SYMBOL_GPL(list_lru_add);
 
 bool list_lru_del(struct list_lru *lru, struct list_head *item)
 {
-	int nid = page_to_nid(virt_to_page(item));
+	int nid = virt_nid(item);
 	struct list_lru_node *nlru = &lru->node[nid];
 	struct list_lru_one *l;
 

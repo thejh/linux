@@ -1016,26 +1016,32 @@ EXPORT_SYMBOL(__kmalloc_node_track_caller);
  * Don't free memory not originally allocated by kmalloc()
  * or you will run into trouble.
  */
+// TODO get rid of kmalloc_large() and extend slabs up to some
+// reasonable limit? with one item per slab and partial lists
+// disabled?
 void kfree(const void *object)
 {
 	struct folio *folio;
 	struct slab *slab;
-	struct kmem_cache *s;
+	unsigned long addr = (unsigned long)object;
 
 	trace_kfree(_RET_IP_, object);
 
 	if (unlikely(ZERO_OR_NULL_PTR(object)))
 		return;
 
-	folio = virt_to_folio(object);
-	if (unlikely(!folio_test_slab(folio))) {
+	if (likely(SLAB_DATA_BASE_ADDR <= addr && addr < SLAB_END_ADDR)) {
+		slab = virt_to_slab(object);
+		__kmem_cache_free(slab->slab_cache, (void *)object, _RET_IP_);
+	} else {
+		folio = virt_to_folio(object);
+		if (folio_test_slab(folio)) {
+			pr_emerg("%s: kfree(%px)\n", __func__, object);
+			dump_page(virt_to_page(object), "unexpected slab page in kfree()");
+			BUG();
+		}
 		free_large_kmalloc(folio, (void *)object);
-		return;
 	}
-
-	slab = folio_slab(folio);
-	s = slab->slab_cache;
-	__kmem_cache_free(s, (void *)object, _RET_IP_);
 }
 EXPORT_SYMBOL(kfree);
 
@@ -1058,17 +1064,13 @@ size_t __ksize(const void *object)
 	if (unlikely(object == ZERO_SIZE_PTR))
 		return 0;
 
+	if (likely(SLAB_DATA_BASE_ADDR <= (unsigned long)object && (unsigned long)object < SLAB_END_ADDR))
+		return slab_ksize(virt_to_slab(object)->slab_cache);
+
 	folio = virt_to_folio(object);
 
-	if (unlikely(!folio_test_slab(folio))) {
-		if (WARN_ON(folio_size(folio) <= KMALLOC_MAX_CACHE_SIZE))
-			return 0;
-		if (WARN_ON(object != folio_address(folio)))
-			return 0;
-		return folio_size(folio);
-	}
-
-	return slab_ksize(folio_slab(folio)->slab_cache);
+	BUG_ON(folio_test_slab(folio));
+	return folio_size(folio);
 }
 
 void *kmalloc_trace(struct kmem_cache *s, gfp_t gfpflags, size_t size)
