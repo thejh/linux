@@ -1547,7 +1547,7 @@ static inline void __mod_memcg_lruvec_state(struct lruvec *lruvec,
 static inline void __mod_lruvec_kmem_state(void *p, enum node_stat_item idx,
 					   int val)
 {
-	struct page *page = virt_to_head_page(p);
+	struct page *page = virt_to_head_page_noderef(p);
 
 	__mod_node_page_state(page_pgdat(page), idx, val);
 }
@@ -1555,7 +1555,7 @@ static inline void __mod_lruvec_kmem_state(void *p, enum node_stat_item idx,
 static inline void mod_lruvec_kmem_state(void *p, enum node_stat_item idx,
 					 int val)
 {
-	struct page *page = virt_to_head_page(p);
+	struct page *page = virt_to_head_page_noderef(p);
 
 	mod_node_page_state(page_pgdat(page), idx, val);
 }
