@@ -2010,7 +2010,9 @@ static inline bool slab_free_freelist_hook(struct kmem_cache *s,
 
 	do {
 		object = next;
-		next = get_freepointer(s, object);
+		/* Single objects don't actually contain a freepointer */
+		if (object != old_tail)
+			next = get_freepointer(s, object, virt_to_slab(object));
 
 		/* If object's reuse doesn't have to be delayed */
 		if (!slab_free_hook(s, object, slab_want_init_on_free(s))) {
