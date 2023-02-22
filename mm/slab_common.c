@@ -1051,7 +1051,7 @@ size_t __ksize(const void *object)
 	folio = virt_to_folio(object);
 
 #ifdef CONFIG_SLUB_DEBUG
-	skip_orig_size_check(folio_slab(folio)->slab_cache, object);
+	skip_orig_size_check(virt_to_slab(object)->slab_cache, object);
 #endif
 
 	BUG_ON(folio_test_slab(folio));

@@ -127,6 +127,7 @@ static_assert(sizeof(struct slab) <= sizeof(struct page));
 #if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && defined(CONFIG_SLUB)
 static_assert(IS_ALIGNED(offsetof(struct slab, freelist), 2*sizeof(void *)));
 #endif
+#endif
 
 /* careful with this if you access the struct folio */
 #define slab_folio_unsafe(s) (s->backing_folio)
