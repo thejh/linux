@@ -793,8 +793,8 @@ int slab_dead_cpu(unsigned int cpu);
 #define slab_dead_cpu		NULL
 #endif
 
-#if 1
-#define STRUCT_SLAB_SIZE (24 * sizeof(void*))
+#ifdef CONFIG_SLAB_VIRTUAL
+#define STRUCT_SLAB_SIZE (24 * sizeof(void *))
 #define SLAB_VPAGES ((SLAB_END_ADDR - SLAB_BASE_ADDR) / PAGE_SIZE)
 #define SLAB_META_SIZE ALIGN(SLAB_VPAGES * STRUCT_SLAB_SIZE, PAGE_SIZE)
 #define SLAB_DATA_BASE_ADDR (SLAB_BASE_ADDR + SLAB_META_SIZE)
@@ -804,11 +804,17 @@ struct page *virt_to_head_page_noderef(void *ptr);
 
 void __init init_slub_page_reclaim(void);
 struct slab;
-int slab_mem_nid(void *virt_ptr);
-#else
-#define is_slab_addr(ptr) PageSlab(virt_to_head_page(ptr))
 
-inline void init_slub_page_reclaim() {}
-#endif
+#else
+
+#define is_slab_addr(addr) folio_test_slab(virt_to_folio(addr))
+
+static inline void init_slub_page_reclaim(void)
+{
+}
+
+#endif /* CONFIG_SLAB_VIRTUAL */
+
+int slab_mem_nid(void *virt_ptr);
 
 #endif	/* _LINUX_SLAB_H */

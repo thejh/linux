@@ -1052,6 +1052,13 @@ static inline struct page *virt_to_head_page(const void *x)
 	return compound_head(page);
 }
 
+#ifndef CONFIG_SLAB_VIRTUAL
+static inline struct page *virt_to_head_page_noderef(void *ptr)
+{
+	return virt_to_head_page(ptr);
+}
+#endif
+
 static inline struct folio *virt_to_folio(const void *x)
 {
 	struct page *page = virt_to_page(x);

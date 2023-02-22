@@ -16,7 +16,7 @@ struct kmem_cache_order_objects {
 
 /* Reuses the bits in struct page */
 struct slab {
-#if 1
+#ifdef CONFIG_SLAB_VIRTUAL
 	struct slab *compound_slab_head;
 	struct folio *backing_folio; /* protected by slub_kworker_lock */
 	/*unsigned int order;*/
@@ -99,7 +99,8 @@ struct slab {
 #error "Unexpected slab allocator configured"
 #endif
 
-#if 0
+// TODO ????
+#ifndef CONFIG_SLAB_VIRTUAL
 	atomic_t __page_refcount;
 #endif
 #ifdef CONFIG_MEMCG
@@ -107,9 +108,12 @@ struct slab {
 #endif
 };
 
+#ifdef CONFIG_SLAB_VIRTUAL
+// TODO why?
 static_assert(sizeof(struct slab) <= STRUCT_SLAB_SIZE);
+#endif
 
-#if 0
+#ifndef CONFIG_SLAB_VIRTUAL
 #define SLAB_MATCH(pg, sl)						\
 	static_assert(offsetof(struct page, pg) == offsetof(struct slab, sl))
 SLAB_MATCH(flags, __page_flags);
@@ -129,10 +133,14 @@ static_assert(IS_ALIGNED(offsetof(struct slab, freelist), 2*sizeof(void *)));
 #endif
 #endif
 
+#ifdef CONFIG_SLAB_VIRTUAL
 /* careful with this if you access the struct folio */
 #define slab_folio_unsafe(s) (s->backing_folio)
+#else
+#define slab_folio_unsafe(s) slab_folio(s)
+#endif
 
-#if 0
+#ifndef CONFIG_SLAB_VIRTUAL
 /**
  * folio_slab - Converts from folio to slab.
  * @folio: The folio.
@@ -188,12 +196,19 @@ static_assert(IS_ALIGNED(offsetof(struct slab, freelist), 2*sizeof(void *)));
 #define slab_page(s) folio_page(slab_folio(s), 0)
 #endif
 
-#if 1
+#ifdef CONFIG_SLAB_VIRTUAL
+
 struct slab *virt_to_slab(const void *kaddr);
 void *slab_to_virt(const struct slab *s);
 struct slab *virt_to_maybe_slab(const void *kaddr);
 struct folio *slab_get_folio(const struct slab *s);
+
+#else
+
+#define virt_to_maybe_slab(addr) virt_to_slab(addr)
+
 #endif
+
 
 /*
  * If network-based swap is enabled, sl*b must keep track of whether pages
@@ -226,8 +241,11 @@ static inline void __slab_clear_pfmemalloc(struct slab *slab)
 
 static inline void *slab_address(const struct slab *slab)
 {
+#ifdef CONFIG_SLAB_VIRTUAL
 	return slab_to_virt(slab);
-	//return folio_address(slab_folio(slab));
+#else
+	return folio_address(slab_folio(slab));
+#endif
 }
 
 static inline int slab_nid(const struct slab *slab)
@@ -240,7 +258,7 @@ static inline pg_data_t *slab_pgdat(const struct slab *slab)
 	return folio_pgdat(slab_folio_unsafe(slab));
 }
 
-#if 0
+#ifndef CONFIG_SLAB_VIRTUAL
 static inline struct slab *virt_to_slab(const void *addr)
 {
 	struct folio *folio;
@@ -269,7 +287,7 @@ static inline unsigned int oo_objects(struct kmem_cache_order_objects x)
 
 static inline int slab_order(const struct slab *slab)
 {
-#if 0
+#ifndef CONFIG_SLAB_VIRTUAL
 	return folio_order((struct folio *)slab_folio(slab));
 #else
 	return oo_order(slab->oo);

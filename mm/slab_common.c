@@ -1002,27 +1002,35 @@ EXPORT_SYMBOL(__kmalloc_node_track_caller);
 // disabled?
 void kfree(const void *object)
 {
-	struct folio *folio;
 	struct slab *slab;
-	unsigned long addr = (unsigned long)object;
+	struct kmem_cache *s;
+	struct folio *folio;
 
 	trace_kfree(_RET_IP_, object);
 
 	if (unlikely(ZERO_OR_NULL_PTR(object)))
 		return;
 
-	if (likely(SLAB_DATA_BASE_ADDR <= addr && addr < SLAB_END_ADDR)) {
-		slab = virt_to_slab(object);
-		__kmem_cache_free(slab->slab_cache, (void *)object, _RET_IP_);
-	} else {
+	if (unlikely(!is_slab_addr(object))) {
 		folio = virt_to_folio(object);
-		if (folio_test_slab(folio)) {
-			pr_emerg("%s: kfree(%px)\n", __func__, object);
-			dump_page(virt_to_page(object), "unexpected slab page in kfree()");
+#ifdef CONFIG_SLAB_VIRTUAL
+		// TODO should this be hidden behind some debugging config?
+
+		// We expect all slab pages to be mapped in the slab virtual
+		// range.
+		if (unlikely(folio_test_slab(folio))) {
+			dump_page(virt_to_page(object),
+				"unexpected slab page mapped outside slab range");
 			BUG();
 		}
+#endif
 		free_large_kmalloc(folio, (void *)object);
+		return;
 	}
+
+	slab = virt_to_slab(object);
+	s = slab->slab_cache;
+	__kmem_cache_free(s, (void *)object, _RET_IP_);
 }
 EXPORT_SYMBOL(kfree);
 
@@ -1045,7 +1053,7 @@ size_t __ksize(const void *object)
 	if (unlikely(object == ZERO_SIZE_PTR))
 		return 0;
 
-	if (likely(SLAB_DATA_BASE_ADDR <= (unsigned long)object && (unsigned long)object < SLAB_END_ADDR))
+	if (likely(is_slab_addr(object)))
 		return slab_ksize(virt_to_slab(object)->slab_cache);
 
 	folio = virt_to_folio(object);

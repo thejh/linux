@@ -621,36 +621,20 @@ static inline freeptr_t freelist_ptr_encode(const struct kmem_cache *s,
 	 * calls get_freepointer() with an untagged pointer, which causes the
 	 * freepointer to be restored incorrectly.
 	 */
-	return (freeptr_t){.v=(unsigned long)ptr ^ s->random ^
+	return (freeptr_t){.v = (unsigned long)ptr ^ s->random ^
 			swab((unsigned long)kasan_reset_tag((void *)ptr_addr))};
 #else
-	return (freeptr_t){.v=(unsigned long)ptr};
+	return (freeptr_t){.v = (unsigned long)ptr};
 #endif
 }
 
-static inline void *freelist_ptr_decode(const struct kmem_cache *s,
-					freeptr_t ptr, unsigned long ptr_addr,
-					struct slab *slab)
+#ifdef CONFIG_SLAB_VIRTUAL
+static inline bool freelist_pointer_corrupted(struct slab *slab, freeptr_t ptr, void *decoded)
 {
-#ifdef CONFIG_SLAB_FREELIST_HARDENED
-	void *decoded;
 	/* TODO: maybe let slab_to_virt load a virtual address from
 	 * struct slab instead of using arithmetic for the translation?
 	 */
-	unsigned long slab_base = (unsigned long)slab_to_virt(slab);
-
-	/*
-	 * When CONFIG_KASAN_SW/HW_TAGS is enabled, ptr_addr might be tagged.
-	 * Normally, this doesn't cause any issues, as both set_freepointer()
-	 * and get_freepointer() are called with a pointer with the same tag.
-	 * However, there are some issues with CONFIG_SLUB_DEBUG code. For
-	 * example, when __free_slub() iterates over objects in a cache, it
-	 * passes untagged pointers to check_object(). check_object() in turns
-	 * calls get_freepointer() with an untagged pointer, which causes the
-	 * freepointer to be restored incorrectly.
-	 */
-	decoded = (void *)(ptr.v ^ s->random ^
-			swab((unsigned long)kasan_reset_tag((void *)ptr_addr)));
+	unsigned long slab_base = decoded ? (unsigned long)slab_to_virt(slab) : 0;
 
 	/*
 	 * This verifies that the SLUB freepointer does not point outside the
@@ -670,23 +654,52 @@ static inline void *freelist_ptr_decode(const struct kmem_cache *s,
 	 * Write it in a way that gives the compiler a chance to avoid adding
 	 * an unpredictable branch.
 	 */
-	slab_base = decoded ? slab_base : 0;
-	if (CHECK_DATA_CORRUPTION(
-			((unsigned long)decoded & slab->align_mask) != slab_base,
-			"bad freeptr (encoded %lx, ptr %px, base %lx, mask %lx",
-			ptr.v, decoded, slab_base, slab->align_mask))
-		return NULL;
-	return decoded;
+	return CHECK_DATA_CORRUPTION(
+		((unsigned long)decoded & slab->align_mask) != slab_base,
+		"bad freeptr (encoded %lx, ptr %p, base %lx, mask %lx",
+		ptr.v, decoded, slab_base, slab->align_mask);
+}
 #else
-	return (void*)ptr.v;
+static inline bool freelist_pointer_corrupted(struct slab *slab, freeptr_t ptr, void *decoded)
+{
+	return false;
+}
+#endif /* CONFIG_SLAB_VIRTUAL */
+
+static inline void *freelist_ptr_decode(const struct kmem_cache *s,
+					freeptr_t ptr, unsigned long ptr_addr,
+					struct slab *slab)
+{
+	void *decoded;
+
+#ifdef CONFIG_SLAB_FREELIST_HARDENED
+	/*
+	 * When CONFIG_KASAN_SW/HW_TAGS is enabled, ptr_addr might be tagged.
+	 * Normally, this doesn't cause any issues, as both set_freepointer()
+	 * and get_freepointer() are called with a pointer with the same tag.
+	 * However, there are some issues with CONFIG_SLUB_DEBUG code. For
+	 * example, when __free_slub() iterates over objects in a cache, it
+	 * passes untagged pointers to check_object(). check_object() in turns
+	 * calls get_freepointer() with an untagged pointer, which causes the
+	 * freepointer to be restored incorrectly.
+	 */
+	decoded = (void *)(ptr.v ^ s->random ^
+		swab((unsigned long)kasan_reset_tag((void *)ptr_addr)));
+#else
+	decoded = (void *)ptr.v;
 #endif
+
+	if (freelist_pointer_corrupted(slab, ptr, decoded))
+		return NULL;
+
+	return decoded;
 }
 
 /* Returns the freelist pointer recorded at location ptr_addr. */
 static inline void *freelist_dereference(const struct kmem_cache *s,
 					 void *ptr_addr, struct slab *slab)
 {
-	return freelist_ptr_decode(s, *(freeptr_t*)(ptr_addr),
+	return freelist_ptr_decode(s, *(freeptr_t *)(ptr_addr),
 				   (unsigned long)ptr_addr, slab);
 }
 
@@ -694,7 +707,7 @@ static inline void *get_freepointer(struct kmem_cache *s, void *object,
 				    struct slab *slab)
 {
 	object = kasan_reset_tag(object);
-	return freelist_dereference(s, (freeptr_t*)(object + s->offset), slab);
+	return freelist_dereference(s, (freeptr_t *)(object + s->offset), slab);
 }
 
 #ifndef CONFIG_SLUB_TINY
@@ -789,7 +802,7 @@ slub_set_cpu_partial(struct kmem_cache *s, unsigned int nr_objects)
  */
 static __always_inline void slab_lock(struct slab *slab)
 {
-#if 1
+#ifdef CONFIG_SLAB_VIRTUAL
 	spin_lock(&slab->slab_lists_lock);
 #else
 	struct page *page = slab_page(slab);
@@ -801,7 +814,7 @@ static __always_inline void slab_lock(struct slab *slab)
 
 static __always_inline void slab_unlock(struct slab *slab)
 {
-#if 1
+#ifdef CONFIG_SLAB_VIRTUAL
 	spin_unlock(&slab->slab_lists_lock);
 #else
 	struct page *page = slab_page(slab);
@@ -2142,6 +2155,47 @@ static void *setup_object(struct kmem_cache *s, void *object)
  * Slab allocation and freeing
  */
 
+#ifndef CONFIG_SLAB_VIRTUAL
+
+static inline bool is_slab_pinned(struct slab *slab)
+{
+	return false;
+}
+
+static inline bool is_slab_pinned_racy(struct slab *slab)
+{
+	return false;
+}
+
+static inline struct slab *alloc_slab_page(struct kmem_cache *s,
+		gfp_t meta_flags, gfp_t flags, int node,
+		struct list_head *freed_slabs,
+		struct kmem_cache_order_objects oo)
+{
+	struct folio *folio;
+	struct slab *slab;
+	unsigned int order = oo_order(oo);
+
+	if (node == NUMA_NO_NODE)
+		folio = (struct folio *)alloc_pages(flags, order);
+	else
+		folio = (struct folio *)__alloc_pages_node(node, flags, order);
+
+	if (!folio)
+		return NULL;
+
+	slab = folio_slab(folio);
+	__folio_set_slab(folio);
+	/* Make the flag visible before any changes to folio->mapping */
+	smp_wmb();
+	if (page_is_pfmemalloc(folio_page(folio, 0)))
+		slab_set_pfmemalloc(slab);
+
+	return slab;
+}
+
+#else
+
 static bool is_slab_pinned(struct slab *slab)
 {
 	int pinstate = atomic_read(&slab->pinstate);
@@ -2209,14 +2263,15 @@ static struct slab *get_slab(struct kmem_cache *s,
  * Careful: We want to be resistant against someone concurrently
  * trying to free objects on the struct slab we're allocating here!
  */
-static struct slab *alloc_slab_pv_page(struct kmem_cache *s,
+static struct slab *alloc_slab_page(struct kmem_cache *s,
 		gfp_t meta_gfp_flags, gfp_t gfp_flags, int node,
 		struct list_head *freed_slabs,
 		struct kmem_cache_order_objects oo)
 {
-	unsigned long flags;
-	struct slab *slab;
 	struct folio *folio;
+	struct slab *slab;
+	unsigned int order = oo_order(oo);
+	unsigned long flags;
 	void *virt_mapping;
 	pte_t *ptep;
 
@@ -2231,9 +2286,9 @@ static struct slab *alloc_slab_pv_page(struct kmem_cache *s,
 		 */
 		gfp_flags |= __GFP_ZERO;
 		if (node == NUMA_NO_NODE)
-			folio = (struct folio *)alloc_pages(gfp_flags, oo_order(oo));
+			folio = (struct folio *)alloc_pages(gfp_flags, order);
 		else
-			folio = (struct folio *)__alloc_pages_node(node, gfp_flags, oo_order(oo));
+			folio = (struct folio *)__alloc_pages_node(node, gfp_flags, order);
 
 		if (!folio) {
 			/* Rollback: put the struct slab back. */
@@ -2377,6 +2432,8 @@ not_slab:
 }
 EXPORT_SYMBOL(slab_phys_to_virt);
 
+#endif /* CONFIG_SLAB_VIRTUAL */
+
 int slab_mem_nid(void *virt_ptr)
 {
 	return slab_nid(virt_to_slab(virt_ptr));
@@ -2494,7 +2551,8 @@ static inline bool shuffle_freelist(struct kmem_cache *s, struct slab *slab)
 static struct slab *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 {
 	struct slab *slab = NULL;
-	struct kmem_cache_order_objects oo;
+	struct kmem_cache_order_objects oo = s->oo;
+	gfp_t alloc_gfp;
 	void *start, *p, *next;
 	int idx;
 	bool shuffle;
@@ -2503,28 +2561,24 @@ static struct slab *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 
 	flags |= s->allocflags;
 
-	if (oo_order(s->oo) != oo_order(s->min)) {
-		gfp_t alloc_gfp;
+	/*
+	 * Let the initial higher-order allocation fail under memory pressure
+	 * so we fall-back to the minimum order allocation.
+	 */
+	alloc_gfp = (flags | __GFP_NOWARN | __GFP_NORETRY) & ~__GFP_NOFAIL;
+	if ((alloc_gfp & __GFP_DIRECT_RECLAIM) && oo_order(oo) > oo_order(s->min))
+		alloc_gfp = (alloc_gfp | __GFP_NOMEMALLOC) & ~__GFP_RECLAIM;
 
-		oo = s->oo;
-		/*
-		 * Let the initial higher-order allocation fail under memory pressure
-		 * so we fall-back to the minimum order allocation.
-		 */
-		alloc_gfp = (flags | __GFP_NOWARN | __GFP_NORETRY) & ~__GFP_NOFAIL;
-		if ((alloc_gfp & __GFP_DIRECT_RECLAIM))
-			alloc_gfp = (alloc_gfp | __GFP_NOMEMALLOC) & ~__GFP_RECLAIM;
+	slab = alloc_slab_page(s, flags, alloc_gfp, node, &s->freed_slabs_normal, oo);
 
-		slab = alloc_slab_pv_page(s, flags, alloc_gfp, node, &s->freed_slabs_normal, oo);
-	}
-
-	if (!slab) {
+	if (unlikely(!slab)) {
 		oo = s->min;
+		alloc_gfp = flags;
 		/*
 		 * Allocation may have failed due to fragmentation.
 		 * Try a lower order alloc if possible
 		 */
-		slab = alloc_slab_pv_page(s, flags, flags, node, &s->freed_slabs_min, oo);
+		slab = alloc_slab_page(s, flags, flags, node, &s->freed_slabs_min, oo);
 		if (unlikely(!slab))
 			return NULL;
 		stat(s, ORDER_FALLBACK);
@@ -2573,6 +2627,7 @@ static struct slab *new_slab(struct kmem_cache *s, gfp_t flags, int node)
 		flags & (GFP_RECLAIM_MASK | GFP_CONSTRAINT_MASK), node);
 }
 
+#ifdef CONFIG_SLAB_VIRTUAL
 static DEFINE_SPINLOCK(slub_kworker_lock);
 static struct kthread_worker *slub_kworker;
 static LIST_HEAD(slub_tlbflush_queue);
@@ -2631,35 +2686,54 @@ static void slub_tlbflush_worker(struct kthread_work *work)
 	spin_unlock_irqrestore(&slub_kworker_lock, irq_flags);
 }
 static DEFINE_KTHREAD_WORK(slub_tlbflush_work, slub_tlbflush_worker);
+#endif /* CONFIG_SLAB_VIRTUAL */
 
 static void __free_slab(struct kmem_cache *s, struct slab *slab)
 {
+	int pages;
+#ifdef CONFIG_SLAB_VIRTUAL
 	int order = oo_order(slab->oo);
-	int pages = 1 << order;
 	unsigned long irq_flags;
 
 	/* Mark the slab as unpopulated unless it was pinned. */
 	atomic_cmpxchg(&slab->pinstate, SLAB_PINSTATE_POPULATED,
 		       SLAB_PINSTATE_UNPOPULATED);
 
-	for (unsigned long i = 0; i < (1UL << oo_order(slab->oo)); i++) {
+	for (unsigned long i = 0; i < (1UL << order); i++) {
 		unsigned long addr = (unsigned long)slab_address(slab) + i*PAGE_SIZE;
 		pte_t *ptep = slub_get_ptep(addr, 0, false);
 
 		BUG_ON(!pte_present(*ptep));
 		ptep_clear(&init_mm, addr, ptep);
 	}
+#else
+	struct folio *folio = slab_folio(slab);
+	int order = folio_order(folio);
+#endif /* CONFIG_SLAB_VIRTUAL */
+	pages = 1 << order;
 
 	__slab_clear_pfmemalloc(slab);
+
+#ifndef CONFIG_SLAB_VIRTUAL
+	folio->mapping = NULL;
+	/* Make the mapping reset visible before clearing the flag */
+	smp_wmb();
+	__folio_clear_slab(folio);
+#endif
+
 	if (current->reclaim_state)
 		current->reclaim_state->reclaimed_slab += pages;
 	unaccount_slab(slab, order, s);
 
+#ifdef CONFIG_SLAB_VIRTUAL
 	spin_lock_irqsave(&slub_kworker_lock, irq_flags);
 	list_add(&slab->flush_list_elem, &slub_tlbflush_queue);
 	spin_unlock_irqrestore(&slub_kworker_lock, irq_flags);
 	if (READ_ONCE(slub_kworker) != NULL)
 		kthread_queue_work(slub_kworker, &slub_tlbflush_work);
+#else
+	__free_pages(folio_page(folio, 0), order);
+#endif /* CONFIG_SLAB_VIRTUAL */
 }
 
 static void rcu_free_slab(struct rcu_head *h)
@@ -5606,6 +5680,7 @@ static struct kmem_cache * __init bootstrap(struct kmem_cache *static_cache)
 	return s;
 }
 
+#ifdef CONFIG_SLAB_VIRTUAL
 /*
  * Late initialization of reclaim kthread.
  * This has to happen way later than kmem_cache_init() because it depends on
@@ -5620,6 +5695,7 @@ void __init init_slub_page_reclaim()
 		panic("unable to create slub-physmem-reclaim worker");
 	smp_store_release(&slub_kworker, w);
 }
+#endif /* CONFIG_SLAB_VIRTUAL */
 
 void __init kmem_cache_init(void)
 {
