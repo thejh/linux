@@ -207,7 +207,8 @@ static struct slab *virt_to_slab_raw(unsigned long kaddr)
 	struct slab *s;
 
 	BUG_ON(!is_slab_addr(kaddr));
-	s = (struct slab *)(SLAB_BASE_ADDR + ((kaddr - SLAB_BASE_ADDR) / PAGE_SIZE * STRUCT_SLAB_SIZE));
+	s = (struct slab *)(SLAB_BASE_ADDR +
+		((kaddr - SLAB_BASE_ADDR) / PAGE_SIZE * STRUCT_SLAB_SIZE));
 	return s;
 }
 
@@ -216,8 +217,8 @@ struct slab *virt_to_slab(const void *kaddr)
 	struct slab *s = virt_to_slab_raw((unsigned long)kaddr);
 	struct slab *s_head = s->compound_slab_head;
 
-	if ((unsigned long)s_head < SLAB_BASE_ADDR || (unsigned long)s_head >= SLAB_DATA_BASE_ADDR) {
-		pr_err("virt_to_slab(%px): %px->compound_slab_head == %px\n", kaddr, s, s_head);
+	if ((unsigned long)s_head < SLAB_BASE_ADDR ||
+		(unsigned long)s_head >= SLAB_DATA_BASE_ADDR) {
 		BUG();
 	}
 	return s_head;
@@ -243,7 +244,7 @@ void *slab_to_virt(const struct slab *s)
 	BUG_ON((unsigned long)s < SLAB_BASE_ADDR || (unsigned long)s >= SLAB_DATA_BASE_ADDR);
 	BUG_ON(((unsigned long)s - SLAB_BASE_ADDR) % STRUCT_SLAB_SIZE != 0);
 	slab_idx = ((unsigned long)s - SLAB_BASE_ADDR) / STRUCT_SLAB_SIZE;
-	return (void*)(SLAB_BASE_ADDR + PAGE_SIZE * slab_idx);
+	return (void *)(SLAB_BASE_ADDR + PAGE_SIZE * slab_idx);
 }
 
 /*
@@ -279,7 +280,7 @@ retry:
 		BUG_ON(!pgtable_l5_enabled());
 		if (!spare_page)
 			goto need_page;
-		p4d_populate(&init_mm, p4d, (pud_t*)page_to_virt(spare_page));
+		p4d_populate(&init_mm, p4d, (pud_t *)page_to_virt(spare_page));
 		goto need_page;
 
 	}
@@ -287,14 +288,15 @@ retry:
 	if (pud_none(READ_ONCE(*pud))) {
 		if (!spare_page)
 			goto need_page;
-		pud_populate(&init_mm, pud, (pmd_t*)page_to_virt(spare_page));
+		pud_populate(&init_mm, pud, (pmd_t *)page_to_virt(spare_page));
 		goto need_page;
 	}
 	pmd = pmd_offset(pud, address);
 	if (pmd_none(READ_ONCE(*pmd))) {
 		if (!spare_page)
 			goto need_page;
-		pmd_populate_kernel(&init_mm, pmd, (pte_t*)page_to_virt(spare_page));
+		pmd_populate_kernel(&init_mm, pmd,
+			(pte_t *)page_to_virt(spare_page));
 		spare_page = NULL;
 	}
 	spin_unlock_irqrestore(&slub_valloc_lock, flags);
@@ -306,7 +308,7 @@ need_page:
 	spin_unlock_irqrestore(&slub_valloc_lock, flags);
 	BUG_ON(!may_alloc);
 	spare_page = alloc_page(gfp_flags);
-	if (!spare_page)
+	if (unlikely(!spare_page))
 		return NULL;
 	/* ensure ordering between page zeroing and PTE write */
 	smp_wmb();
@@ -354,7 +356,7 @@ retry_locked:
 	data_range_start = ALIGN(old_base + PAGE_SIZE, alloc_size);
 	data_range_end = data_range_start + alloc_size;
 
-	BUG_ON(SLAB_BASE_ADDR > data_range_end || data_range_end >= SLAB_END_ADDR);
+	BUG_ON(data_range_end < SLAB_BASE_ADDR || data_range_end >= SLAB_END_ADDR);
 
 	meta_range_start = (unsigned long)virt_to_slab_raw(data_range_start);
 	meta_range_last = meta_range_start + STRUCT_SLAB_SIZE * ((1UL << order) - 1);
@@ -628,13 +630,16 @@ static inline freeptr_t freelist_ptr_encode(const struct kmem_cache *s,
 #endif
 }
 
-#ifdef CONFIG_SLAB_VIRTUAL
-static inline bool freelist_pointer_corrupted(struct slab *slab, freeptr_t ptr, void *decoded)
+static inline bool freelist_pointer_corrupted(struct slab *slab, freeptr_t ptr,
+	void *decoded)
 {
-	/* TODO: maybe let slab_to_virt load a virtual address from
+#ifdef CONFIG_SLAB_VIRTUAL
+	/*
+	 * TODO: maybe let slab_to_virt load a virtual address from
 	 * struct slab instead of using arithmetic for the translation?
 	 */
-	unsigned long slab_base = decoded ? (unsigned long)slab_to_virt(slab) : 0;
+	unsigned long slab_base = decoded ? (unsigned long)slab_to_virt(slab)
+		: 0;
 
 	/*
 	 * This verifies that the SLUB freepointer does not point outside the
@@ -658,13 +663,10 @@ static inline bool freelist_pointer_corrupted(struct slab *slab, freeptr_t ptr, 
 		((unsigned long)decoded & slab->align_mask) != slab_base,
 		"bad freeptr (encoded %lx, ptr %p, base %lx, mask %lx",
 		ptr.v, decoded, slab_base, slab->align_mask);
-}
 #else
-static inline bool freelist_pointer_corrupted(struct slab *slab, freeptr_t ptr, void *decoded)
-{
 	return false;
+#endif
 }
-#endif /* CONFIG_SLAB_VIRTUAL */
 
 static inline void *freelist_ptr_decode(const struct kmem_cache *s,
 					freeptr_t ptr, unsigned long ptr_addr,
@@ -689,7 +691,7 @@ static inline void *freelist_ptr_decode(const struct kmem_cache *s,
 	decoded = (void *)ptr.v;
 #endif
 
-	if (freelist_pointer_corrupted(slab, ptr, decoded))
+	if (unlikely(freelist_pointer_corrupted(slab, ptr, decoded)))
 		return NULL;
 
 	return decoded;
@@ -737,7 +739,7 @@ static inline freeptr_t get_freepointer_safe(struct kmem_cache *s, void *object)
 		return *(freeptr_t*)freepointer_addr;
 
 	object = kasan_reset_tag(object);
-	copy_from_kernel_nofault(&p, (freeptr_t*)freepointer_addr, sizeof(p));
+	copy_from_kernel_nofault(&p, (freeptr_t *)freepointer_addr, sizeof(p));
 	return p;
 }
 
@@ -750,7 +752,7 @@ static inline void set_freepointer(struct kmem_cache *s, void *object, void *fp)
 #endif
 
 	freeptr_addr = (unsigned long)kasan_reset_tag((void *)freeptr_addr);
-	*(freeptr_t*)freeptr_addr = freelist_ptr_encode(s, fp, freeptr_addr);
+	*(freeptr_t *)freeptr_addr = freelist_ptr_encode(s, fp, freeptr_addr);
 }
 
 /* Loop over all objects in a slab */
@@ -1540,7 +1542,7 @@ static int check_slab(struct kmem_cache *s, struct slab *slab)
 {
 	int maxobj;
 
-#if 0
+#ifndef CONFIG_SLAB_VIRTUAL
 	if (!folio_test_slab(slab_folio(slab))) {
 		slab_err(s, slab, "Not a valid slab page");
 		return 0;
@@ -2344,7 +2346,7 @@ struct page *virt_to_head_page_noderef(void *virt_ptr)
 
 unsigned long slab_virt_to_phys(unsigned long x)
 {
-	struct slab *slab = virt_to_slab((void*)x);
+	struct slab *slab = virt_to_slab((void *)x);
 	struct folio *f = slab_folio_unsafe(slab);
 
 	if (!is_slab_pinned_racy(slab)) {
@@ -2355,9 +2357,11 @@ unsigned long slab_virt_to_phys(unsigned long x)
 					  cx_ret != SLAB_PINSTATE_PINNED,
 					  "trying to pin unpopulated slab (cx_ret=0x%x)",
 					  (unsigned int)cx_ret)) {
-			/* this is going to crash, no way around it, we're
+			/*
+			 * This is going to crash, no way around it, we're
 			 * trying to do a virt-to-phys conversion of virtual
-			 * memory that has no physical page */
+			 * memory that has no physical page
+			 */
 			BUG();
 		}
 	}
@@ -2388,8 +2392,10 @@ void *slab_phys_to_virt(unsigned long phys)
 {
 	struct page *p = pfn_to_page(PFN_DOWN(phys));
 	struct folio *f = page_folio(p); /* racy, folio might detach */
-	/* might be reading non-live union field, could be mapping or compound
-	 * mapcount/pincount! */
+	/*
+	 * Might be reading non-live union field, could be mapping or compound
+	 * mapcount/pincount!
+	 */
 	unsigned long slab_raw = (unsigned long)READ_ONCE(f->slab);
 	struct slab *slab;
 	int slab_pinstate;
@@ -2428,7 +2434,7 @@ void *slab_phys_to_virt(unsigned long phys)
 
 not_slab:
 	pr_warn("%s(0x%lx): decided not slab (racy?)\n", __func__, phys);
-	return (void*)(phys + PAGE_OFFSET);
+	return (void *)(phys + PAGE_OFFSET);
 }
 EXPORT_SYMBOL(slab_phys_to_virt);
 
@@ -5686,13 +5692,15 @@ static struct kmem_cache * __init bootstrap(struct kmem_cache *static_cache)
  * This has to happen way later than kmem_cache_init() because it depends on
  * having all the kthread infrastructure ready.
  */
-void __init init_slub_page_reclaim()
+void __init init_slub_page_reclaim(void)
 {
 	struct kthread_worker *w;
 
 	w = kthread_create_worker(0, "slub-physmem-reclaim");
 	if (IS_ERR(w))
 		panic("unable to create slub-physmem-reclaim worker");
+
+	// TODO why is this needed?
 	smp_store_release(&slub_kworker, w);
 }
 #endif /* CONFIG_SLAB_VIRTUAL */
