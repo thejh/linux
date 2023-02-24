@@ -330,7 +330,7 @@ static struct slab *alloc_slab_meta(unsigned int order, gfp_t gfp_flags)
 	unsigned long addr;
 	struct slab *slab;
 
-	gfp_flags &= (__GFP_ATOMIC | __GFP_HIGH | __GFP_RECLAIM | __GFP_IO |
+	gfp_flags &= (__GFP_HIGH | __GFP_RECLAIM | __GFP_IO |
 		      __GFP_FS | __GFP_NOWARN | __GFP_RETRY_MAYFAIL |
 		      __GFP_NOFAIL | __GFP_NORETRY | __GFP_MEMALLOC |
 		      __GFP_NOMEMALLOC);
