@@ -378,11 +378,10 @@ retry_locked:
 			if (meta_page == NULL)
 				return NULL;
 			spin_lock_irqsave(&slub_valloc_lock, flags);
-			if (pte_none(READ_ONCE(*ptep))) {
+			if (pte_none(READ_ONCE(*ptep)))
 				set_pte_safe(ptep, mk_pte(meta_page, PAGE_KERNEL));
-			} else {
+			else
 				__free_page(meta_page);
-			}
 		}
 		spin_unlock_irqrestore(&slub_valloc_lock, flags);
 	}
@@ -406,7 +405,7 @@ retry_locked:
 	spin_unlock_irqrestore(&slub_valloc_lock, flags);
 
 	/* Initialize basic slub metadata for virt_to_slab() */
-	for (unsigned long i=0; i<(1UL<<order); i++)
+	for (unsigned long i = 0; i < (1UL << order); i++)
 		((struct slab *)(meta_range_start + i*STRUCT_SLAB_SIZE))->compound_slab_head = (struct slab *)meta_range_start;
 
 	slab = (struct slab *)meta_range_start;

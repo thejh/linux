@@ -794,11 +794,13 @@ int slab_dead_cpu(unsigned int cpu);
 #endif
 
 #ifdef CONFIG_SLAB_VIRTUAL
+
 #define STRUCT_SLAB_SIZE (24 * sizeof(void *))
 #define SLAB_VPAGES ((SLAB_END_ADDR - SLAB_BASE_ADDR) / PAGE_SIZE)
 #define SLAB_META_SIZE ALIGN(SLAB_VPAGES * STRUCT_SLAB_SIZE, PAGE_SIZE)
 #define SLAB_DATA_BASE_ADDR (SLAB_BASE_ADDR + SLAB_META_SIZE)
-#define is_slab_addr(ptr) ((unsigned long)ptr >= SLAB_DATA_BASE_ADDR && (unsigned long)ptr < SLAB_END_ADDR)
+#define is_slab_addr(ptr) ((unsigned long)ptr >= SLAB_DATA_BASE_ADDR && \
+	(unsigned long)ptr < SLAB_END_ADDR)
 
 struct page *virt_to_head_page_noderef(void *ptr);
 
