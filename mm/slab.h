@@ -71,17 +71,15 @@ struct slab {
 #endif
 			};
 			/* Double-word boundary */
-			struct {
-				void *freelist;		/* first free object */
-				union {
-					unsigned long counters;
-					struct {
-						unsigned inuse:16;
-						unsigned objects:15;
-						unsigned frozen:1;
-					};
+			void *freelist;		/* first free object */
+			union {
+				unsigned long counters;
+				struct {
+					unsigned inuse:16;
+					unsigned objects:15;
+					unsigned frozen:1;
 				};
-			} __attribute__ ((aligned(16)));
+			};
 		};
 		struct rcu_head rcu_head;
 	};
