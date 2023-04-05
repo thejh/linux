@@ -1,6 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #ifndef MM_SLAB_H
 #define MM_SLAB_H
+
+#include <linux/build_bug.h>
+#include <linux/slab.h>
+#include <linux/mm.h>
+
 /*
  * Internal slab definitions
  */
@@ -16,31 +21,46 @@ struct kmem_cache_order_objects {
 
 /* Reuses the bits in struct page */
 struct slab {
-#ifdef CONFIG_SLAB_VIRTUAL
+	/*
+	 * With CONFIG_SLAB_VIRTUAL enabled instances of struct slab are not
+	 * overlapped with struct page but instead they are allocated from
+	 * a dedicated virtual memory area.
+	 */
+#ifndef CONFIG_SLAB_VIRTUAL
+	unsigned long __page_flags;
+#else
+	/*
+	 * Used by virt_to_slab to find the actual struct slab for a slab that
+	 * spans multiple pages.
+	 */
 	struct slab *compound_slab_head;
-	struct folio *backing_folio; /* protected by slub_kworker_lock */
-	/*unsigned int order;*/
+
+	/*
+	 * Pointer to the folio that the objects are allocated from, or NULL if
+	 * the slab is currently unused and no physical memory is allocated to
+	 * it. Protected by slub_kworker_lock.
+	 */
+	struct folio *backing_folio;
+
 	struct kmem_cache_order_objects oo;
-	spinlock_t slab_lists_lock;
+
 	struct list_head flush_list_elem;
-	/* not in kmem_cache because it depends on whether the allocation is
+
+	/*
+	 * Not in kmem_cache because it depends on whether the allocation is
 	 * normal order or fallback order.
 	 * an alternative might be to over-allocate virtual memory for
 	 * fallback-order pages.
 	 */
 	unsigned long align_mask;
 
+	/* Replaces the page lock */
+	spinlock_t slab_lock;
+
 #define SLAB_PINSTATE_UNPOPULATED 0x40
 #define SLAB_PINSTATE_POPULATED 0x41
 #define SLAB_PINSTATE_PINNED 0x42
 	atomic_t pinstate;
-
-	/*
-	 * TODO include explicit pointer to data mapping to avoid arithmetic
-	 * here?
-	 */
-#else
-	unsigned long __page_flags;
 #endif
 
 #if defined(CONFIG_SLAB)
@@ -97,7 +117,7 @@ struct slab {
 #error "Unexpected slab allocator configured"
 #endif
 
-// TODO ????
+	/* See comment for __page_flags above. */
 #ifndef CONFIG_SLAB_VIRTUAL
 	atomic_t __page_refcount;
 #endif
@@ -107,10 +127,11 @@ struct slab {
 };
 
 #ifdef CONFIG_SLAB_VIRTUAL
-// TODO why?
-static_assert(sizeof(struct slab) <= STRUCT_SLAB_SIZE);
+// TODO get rid of this
+static_assert(sizeof(struct slab) != STRUCT_SLAB_SIZE);
 #endif
 
+/* See comment for __page_flags above. */
 #ifndef CONFIG_SLAB_VIRTUAL
 #define SLAB_MATCH(pg, sl)						\
 	static_assert(offsetof(struct page, pg) == offsetof(struct slab, sl))
@@ -126,16 +147,18 @@ SLAB_MATCH(memcg_data, memcg_data);
 #endif
 #undef SLAB_MATCH
 static_assert(sizeof(struct slab) <= sizeof(struct page));
+#endif
+
 #if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && defined(CONFIG_SLUB)
 static_assert(IS_ALIGNED(offsetof(struct slab, freelist), 2*sizeof(void *)));
 #endif
-#endif
 
 #ifdef CONFIG_SLAB_VIRTUAL
-/* careful with this if you access the struct folio */
 #define slab_folio_unsafe(s) (s->backing_folio)
+#define is_slab_page(s) ((unsigned long)(s) >= SLAB_BASE_ADDR && (unsigned long)(s) < SLAB_DATA_BASE_ADDR)
 #else
 #define slab_folio_unsafe(s) slab_folio(s)
+#define is_slab_page(s) folio_test_slab(slab_folio(s))
 #endif
 
 #ifndef CONFIG_SLAB_VIRTUAL
@@ -199,7 +222,6 @@ static_assert(IS_ALIGNED(offsetof(struct slab, freelist), 2*sizeof(void *)));
 struct slab *virt_to_slab(const void *kaddr);
 void *slab_to_virt(const struct slab *s);
 struct slab *virt_to_maybe_slab(const void *kaddr);
-struct folio *slab_get_folio(const struct slab *s);
 
 #else
 
@@ -214,27 +236,22 @@ struct folio *slab_get_folio(const struct slab *s);
  */
 static inline bool slab_test_pfmemalloc(const struct slab *slab)
 {
-	// TODO
-	//return folio_test_active((struct folio *)slab_folio(slab));
-	return false;
+	return folio_test_active(slab_folio_unsafe(slab));
 }
 
 static inline void slab_set_pfmemalloc(struct slab *slab)
 {
-	// TODO
-	//folio_set_active(slab_folio(slab));
+	folio_set_active(slab_folio_unsafe(slab));
 }
 
 static inline void slab_clear_pfmemalloc(struct slab *slab)
 {
-	// TODO
-	//folio_clear_active(slab_folio(slab));
+	folio_clear_active(slab_folio_unsafe(slab));
 }
 
 static inline void __slab_clear_pfmemalloc(struct slab *slab)
 {
-	// TODO
-	//__folio_clear_active(slab_folio(slab));
+	__folio_clear_active(slab_folio_unsafe(slab));
 }
 
 static inline void *slab_address(const struct slab *slab)

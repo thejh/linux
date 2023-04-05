@@ -235,14 +235,14 @@ void *slab_to_virt(const struct slab *s)
 {
 	unsigned long slab_idx;
 
+	BUG_ON(!is_slab_meta(s));
+	BUG_ON(((unsigned long)s - SLAB_BASE_ADDR) % STRUCT_SLAB_SIZE != 0);
+
 	if (s->compound_slab_head != s) {
-		pr_err("s->compound_slab_head == 0x%lx, s == 0x%lx\n",
-			(unsigned long)s->compound_slab_head, (unsigned long)s);
+		pr_err("s->compound_slab_head == %p, s == %p\n",
+			s->compound_slab_head, s);
 		BUG();
 	}
-	BUG_ON(s->compound_slab_head != s);
-	BUG_ON((unsigned long)s < SLAB_BASE_ADDR || (unsigned long)s >= SLAB_DATA_BASE_ADDR);
-	BUG_ON(((unsigned long)s - SLAB_BASE_ADDR) % STRUCT_SLAB_SIZE != 0);
 	slab_idx = ((unsigned long)s - SLAB_BASE_ADDR) / STRUCT_SLAB_SIZE;
 	return (void *)(SLAB_BASE_ADDR + PAGE_SIZE * slab_idx);
 }
@@ -353,10 +353,15 @@ retry_locked:
 	 * of the objects being allocated, but for now, we behave like the page
 	 * allocator would.
 	 */
+	// Leave one page as guard, and then align up to the allocation size
 	data_range_start = ALIGN(old_base + PAGE_SIZE, alloc_size);
 	data_range_end = data_range_start + alloc_size;
 
-	BUG_ON(data_range_end < SLAB_BASE_ADDR || data_range_end >= SLAB_END_ADDR);
+	BUG_ON(data_range_start < SLAB_BASE_ADDR || data_range_end < SLAB_BASE_ADDR);
+
+	/* We ran out of virtual memory for slabs */
+	if (data_range_start >= SLAB_END_ADDR || data_range_end >= SLAB_END_ADDR)
+		return NULL;
 
 	meta_range_start = (unsigned long)virt_to_slab_raw(data_range_start);
 	meta_range_last = meta_range_start + STRUCT_SLAB_SIZE * ((1UL << order) - 1);
@@ -378,6 +383,8 @@ retry_locked:
 			if (meta_page == NULL)
 				return NULL;
 			spin_lock_irqsave(&slub_valloc_lock, flags);
+
+			/* Make sure that no one else has already mapped that page */
 			if (pte_none(READ_ONCE(*ptep)))
 				set_pte_safe(ptep, mk_pte(meta_page, PAGE_KERNEL));
 			else
@@ -409,10 +416,10 @@ retry_locked:
 		((struct slab *)(meta_range_start + i*STRUCT_SLAB_SIZE))->compound_slab_head = (struct slab *)meta_range_start;
 
 	slab = (struct slab *)meta_range_start;
-	spin_lock_init(&slab->slab_lists_lock);
+	spin_lock_init(&slab->slab_lock);
 	atomic_set(&slab->pinstate, SLAB_PINSTATE_UNPOPULATED);
 
-	return (struct slab *)meta_range_start;
+	return slab;
 }
 #endif /* CONFIG_SLAB_VIRTUAL */
 
@@ -804,7 +811,7 @@ slub_set_cpu_partial(struct kmem_cache *s, unsigned int nr_objects)
 static __always_inline void slab_lock(struct slab *slab)
 {
 #ifdef CONFIG_SLAB_VIRTUAL
-	spin_lock(&slab->slab_lists_lock);
+	spin_lock(&slab->slab_lock);
 #else
 	struct page *page = slab_page(slab);
 
@@ -816,7 +823,7 @@ static __always_inline void slab_lock(struct slab *slab)
 static __always_inline void slab_unlock(struct slab *slab)
 {
 #ifdef CONFIG_SLAB_VIRTUAL
-	spin_unlock(&slab->slab_lists_lock);
+	spin_unlock(&slab->slab_lock);
 #else
 	struct page *page = slab_page(slab);
 
@@ -1746,7 +1753,7 @@ static noinline bool alloc_debug_processing(struct kmem_cache *s,
 	return true;
 
 bad:
-	if (1/*folio_test_slab(slab_folio(slab))*/) {
+	if (is_slab_page(slab)) {
 		/*
 		 * If this is a slab page then lets do the best we can
 		 * to avoid issues in the future. Marking all objects
@@ -1776,7 +1783,7 @@ static inline int free_consistency_checks(struct kmem_cache *s,
 		return 0;
 
 	if (unlikely(s != slab->slab_cache)) {
-		if (0/*!folio_test_slab(slab_folio(slab))*/) {
+		if (!is_slab_page(slab)) {
 			slab_err(s, slab, "Attempt to free object(0x%p) outside of slab",
 				 object);
 		} else if (!slab->slab_cache) {
