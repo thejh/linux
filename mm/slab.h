@@ -236,7 +236,7 @@ struct slab *virt_to_maybe_slab(const void *kaddr);
  */
 static inline bool slab_test_pfmemalloc(const struct slab *slab)
 {
-	return folio_test_active(slab_folio_unsafe(slab));
+	return folio_test_active((struct folio *)slab_folio_unsafe(slab));
 }
 
 static inline void slab_set_pfmemalloc(struct slab *slab)
