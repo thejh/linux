@@ -118,11 +118,13 @@ list_lru_from_kmem(struct list_lru *lru, int nid, void *ptr,
 
 static int virt_nid(void *ptr)
 {
+#ifdef CONFIG_SLAB_VIRTUAL
 	if (is_slab_addr(ptr)) {
 		return slab_mem_nid(ptr);
-	} else {
-		return page_to_nid(virt_to_page(ptr));
 	}
+#endif
+
+	return page_to_nid(virt_to_page(ptr));
 }
 
 bool list_lru_add(struct list_lru *lru, struct list_head *item)
