@@ -5,6 +5,7 @@
 #include <asm/sparsemem.h>
 
 #ifndef __ASSEMBLY__
+#include <linux/align.h>
 #include <linux/types.h>
 #include <asm/kaslr.h>
 
@@ -203,6 +204,17 @@ extern unsigned int ptrs_per_p4d;
 #define SLAB_PGD_ENTRY		_AC(-3, UL)
 #define SLAB_BASE_ADDR		(SLAB_PGD_ENTRY << P4D_SHIFT)
 #define SLAB_END_ADDR		(SLAB_BASE_ADDR + P4D_SIZE)
+
+/* TODO get rid of this */
+#define STRUCT_SLAB_SIZE (24 * sizeof(void *))
+#define SLAB_VPAGES ((SLAB_END_ADDR - SLAB_BASE_ADDR) / PAGE_SIZE)
+#define SLAB_META_SIZE ALIGN(SLAB_VPAGES * STRUCT_SLAB_SIZE, PAGE_SIZE)
+#define SLAB_DATA_BASE_ADDR (SLAB_BASE_ADDR + SLAB_META_SIZE)
+#define is_slab_addr(ptr) ((unsigned long)(ptr) >= SLAB_DATA_BASE_ADDR && \
+	(unsigned long)(ptr) < SLAB_END_ADDR)
+#define is_slab_meta(ptr) ((unsigned long)(ptr) >= SLAB_BASE_ADDR && \
+	(unsigned long)(ptr) < SLAB_DATA_BASE_ADDR)
+
 #endif /* CONFIG_SLAB_VIRTUAL */
 
 #define CPU_ENTRY_AREA_PGD	_AC(-4, UL)

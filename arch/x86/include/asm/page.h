@@ -55,7 +55,12 @@ static inline void copy_user_page(void *to, void *from, unsigned long vaddr,
 	__phys_addr_symbol(__phys_reloc_hide((unsigned long)(x)))
 
 #ifndef __va
+#ifndef CONFIG_SLAB_VIRTUAL
 #define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
+#else
+void *__virt_addr(unsigned long);
+#define __va(x) __virt_addr((unsigned long)(x))
+#endif
 #endif
 
 #define __boot_va(x)		__va(x)

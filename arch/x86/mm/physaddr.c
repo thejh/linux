@@ -52,10 +52,11 @@ unsigned long __phys_addr_symbol(unsigned long x)
 	return y + phys_base;
 }
 EXPORT_SYMBOL(__phys_addr_symbol);
+#endif
 
+#ifdef CONFIG_SLAB_VIRTUAL
 void *__virt_addr(unsigned long x)
 {
-#ifdef CONFIG_SLAB_VIRTUAL
 	struct page *p;
 	struct folio *f;
 
@@ -71,9 +72,8 @@ void *__virt_addr(unsigned long x)
 		if (unlikely(folio_test_slab(f)))
 			return slab_phys_to_virt(x);
 	}
-#endif
 
-	return (void*)(x + PAGE_OFFSET);
+	return (void *)((unsigned long)x + PAGE_OFFSET);
 }
 EXPORT_SYMBOL(__virt_addr);
 #endif
