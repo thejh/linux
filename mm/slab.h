@@ -91,15 +91,17 @@ struct slab {
 #endif
 			};
 			/* Double-word boundary */
-			void *freelist;		/* first free object */
-			union {
-				unsigned long counters;
-				struct {
-					unsigned inuse:16;
-					unsigned objects:15;
-					unsigned frozen:1;
+			struct {
+				void *freelist;		/* first free object */
+				union {
+					unsigned long counters;
+					struct {
+						unsigned inuse:16;
+						unsigned objects:15;
+						unsigned frozen:1;
+					};
 				};
-			};
+			} __aligned(16);
 		};
 		struct rcu_head rcu_head;
 	};
@@ -156,6 +158,7 @@ static_assert(IS_ALIGNED(offsetof(struct slab, freelist), 2*sizeof(void *)));
 #ifdef CONFIG_SLAB_VIRTUAL
 #define slab_folio_unsafe(s) (s->backing_folio)
 #define is_slab_page(s) ((unsigned long)(s) >= SLAB_BASE_ADDR && (unsigned long)(s) < SLAB_DATA_BASE_ADDR)
+static_assert(__alignof__(struct slab) == 16);
 #else
 #define slab_folio_unsafe(s) slab_folio(s)
 #define is_slab_page(s) folio_test_slab(slab_folio(s))
