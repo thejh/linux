@@ -10,6 +10,13 @@
  * (C) 2011 Linux Foundation, Christoph Lameter
  */
 
+#include "asm/page_types.h"
+#include "asm/pgtable.h"
+#include "asm/pgtable_64_types.h"
+#include "linux/align.h"
+#include "linux/gfp.h"
+#include "linux/page-flags.h"
+#include "linux/spinlock.h"
 #include <linux/mm.h>
 #include <linux/swap.h> /* struct reclaim_state */
 #include <linux/module.h>
@@ -195,7 +202,9 @@
  */
 
 #ifdef CONFIG_SLAB_VIRTUAL
-unsigned long slub_addr_base = SLAB_DATA_BASE_ADDR + PAGE_SIZE;
+unsigned long slub_addr_base = SLAB_DATA_BASE_ADDR;
+static_assert(IS_ALIGNED(SLAB_DATA_BASE_ADDR, PMD_SIZE));
+#define PMD_ORDER (PMD_SHIFT - PAGE_SHIFT)
 static DEFINE_SPINLOCK(slub_valloc_lock);
 
 /*
@@ -207,8 +216,7 @@ static struct slab *virt_to_slab_raw(unsigned long kaddr)
 	struct slab *s;
 
 	BUG_ON(!is_slab_addr(kaddr));
-	s = (struct slab *)(SLAB_BASE_ADDR +
-		((kaddr - SLAB_BASE_ADDR) / PAGE_SIZE * STRUCT_SLAB_SIZE));
+	s = (struct slab *)(SLAB_BASE_ADDR + (((kaddr - SLAB_BASE_ADDR) / PAGE_SIZE) * sizeof (struct slab)));
 	return s;
 }
 
@@ -217,8 +225,7 @@ struct slab *virt_to_slab(const void *kaddr)
 	struct slab *s = virt_to_slab_raw((unsigned long)kaddr);
 	struct slab *s_head = s->compound_slab_head;
 
-	if ((unsigned long)s_head < SLAB_BASE_ADDR ||
-		(unsigned long)s_head >= SLAB_DATA_BASE_ADDR) {
+	if (!is_slab_meta(s_head)) {
 		BUG();
 	}
 	return s_head;
@@ -236,14 +243,14 @@ void *slab_to_virt(const struct slab *s)
 	unsigned long slab_idx;
 
 	BUG_ON(!is_slab_meta(s));
-	BUG_ON(((unsigned long)s - SLAB_BASE_ADDR) % STRUCT_SLAB_SIZE != 0);
+	BUG_ON(((unsigned long)s - SLAB_BASE_ADDR) % sizeof(struct slab) != 0);
 
 	if (s->compound_slab_head != s) {
 		pr_err("s->compound_slab_head == %p, s == %p\n",
 			s->compound_slab_head, s);
 		BUG();
 	}
-	slab_idx = ((unsigned long)s - SLAB_BASE_ADDR) / STRUCT_SLAB_SIZE;
+	slab_idx = ((unsigned long)s - SLAB_BASE_ADDR) / sizeof(struct slab);
 	return (void *)(SLAB_BASE_ADDR + PAGE_SIZE * slab_idx);
 }
 
@@ -258,15 +265,16 @@ void *slab_to_virt(const struct slab *s)
  *
  * (This is hacky code and might break on non-X86.)
  */
-static pte_t *slub_get_ptep(unsigned long address, gfp_t gfp_flags,
+static pmd_t *slub_get_pmdp(unsigned long address, gfp_t gfp_flags,
 			    bool may_alloc)
 {
 	pgd_t *pgd = pgd_offset_k(address);
 	p4d_t *p4d;
 	pud_t *pud;
-	pmd_t *pmd;
 	unsigned long flags;
 	struct page *spare_page = NULL;
+
+	BUG_ON(!IS_ALIGNED(address, PMD_SIZE));
 
 retry:
 	spin_lock_irqsave(&slub_valloc_lock, flags);
@@ -275,8 +283,13 @@ retry:
 	 * preallocate_top_level_entries().
 	 */
 	BUG_ON(pgd_none(READ_ONCE(*pgd)));
+	// On 5 level systems the p4d exists
+	// On 4 level systems the pud exists
 	p4d = p4d_offset(pgd, address);
 	if (p4d_none(READ_ONCE(*p4d))) {
+		// On 4 level systems the p4d is already allocated and points to
+		// a pud because it got preallocated
+		// On a 5 level system it's not preallocated yet
 		BUG_ON(!pgtable_l5_enabled());
 		if (!spare_page)
 			goto need_page;
@@ -286,23 +299,16 @@ retry:
 	}
 	pud = pud_offset(p4d, address);
 	if (pud_none(READ_ONCE(*pud))) {
+		// Allocate the pmd (PDT)
 		if (!spare_page)
 			goto need_page;
 		pud_populate(&init_mm, pud, (pmd_t *)page_to_virt(spare_page));
-		goto need_page;
-	}
-	pmd = pmd_offset(pud, address);
-	if (pmd_none(READ_ONCE(*pmd))) {
-		if (!spare_page)
-			goto need_page;
-		pmd_populate_kernel(&init_mm, pmd,
-			(pte_t *)page_to_virt(spare_page));
 		spare_page = NULL;
 	}
 	spin_unlock_irqrestore(&slub_valloc_lock, flags);
 	if (spare_page)
 		__free_page(spare_page);
-	return pte_offset_kernel(pmd, address);
+	return pmd_offset(pud, address);
 
 need_page:
 	spin_unlock_irqrestore(&slub_valloc_lock, flags);
@@ -315,112 +321,6 @@ need_page:
 	goto retry;
 }
 
-/*
- * Reserve a range of virtual address space, ensure that we have page tables for
- * it, and allocate a corresponding struct slab.
- * This is cold code, we don't really have to worry about performance here.
- */
-static struct slab *alloc_slab_meta(unsigned int order, gfp_t gfp_flags)
-{
-	unsigned long alloc_size = PAGE_SIZE << order;
-	unsigned long flags;
-	unsigned long old_base;
-	unsigned long data_range_start, data_range_end;
-	unsigned long meta_range_start, meta_range_last;
-	unsigned long addr;
-	struct slab *slab;
-
-	gfp_flags &= (__GFP_HIGH | __GFP_RECLAIM | __GFP_IO |
-		      __GFP_FS | __GFP_NOWARN | __GFP_RETRY_MAYFAIL |
-		      __GFP_NOFAIL | __GFP_NORETRY | __GFP_MEMALLOC |
-		      __GFP_NOMEMALLOC);
-	/* new pagetables and metadata pages should be zeroed */
-	gfp_flags |= __GFP_ZERO;
-
-	spin_lock_irqsave(&slub_valloc_lock, flags);
-retry_locked:
-	old_base = slub_addr_base;
-	/*
-	 * We drop the lock. The following code might sleep during
-	 * pagetable allocation. Any mutations we make before rechecking
-	 * slub_addr_base are idempotent, so that's fine.
-	 */
-	spin_unlock_irqrestore(&slub_valloc_lock, flags);
-
-	/*
-	 * We want a guard page and alignment appropriate for the order.
-	 * Note that this could be relaxed based on the alignment requirements
-	 * of the objects being allocated, but for now, we behave like the page
-	 * allocator would.
-	 */
-	// Leave one page as guard, and then align up to the allocation size
-	data_range_start = ALIGN(old_base + PAGE_SIZE, alloc_size);
-	data_range_end = data_range_start + alloc_size;
-
-	BUG_ON(data_range_start < SLAB_BASE_ADDR || data_range_end < SLAB_BASE_ADDR);
-
-	/* We ran out of virtual memory for slabs */
-	if (data_range_start >= SLAB_END_ADDR || data_range_end >= SLAB_END_ADDR)
-		return NULL;
-
-	meta_range_start = (unsigned long)virt_to_slab_raw(data_range_start);
-	meta_range_last = meta_range_start + STRUCT_SLAB_SIZE * ((1UL << order) - 1);
-
-	/* Ensure the meta address range is mapped. */
-	for (addr = ALIGN_DOWN(meta_range_start, PAGE_SIZE);
-	     addr <= (unsigned long)meta_range_last + (STRUCT_SLAB_SIZE-1);
-	     addr += PAGE_SIZE) {
-		pte_t *ptep = slub_get_ptep(addr, gfp_flags, true);
-
-		if (ptep == NULL)
-			return NULL;
-		spin_lock_irqsave(&slub_valloc_lock, flags);
-		if (pte_none(READ_ONCE(*ptep))) {
-			struct page *meta_page;
-
-			spin_unlock_irqrestore(&slub_valloc_lock, flags);
-			meta_page = alloc_page(gfp_flags);
-			if (meta_page == NULL)
-				return NULL;
-			spin_lock_irqsave(&slub_valloc_lock, flags);
-
-			/* Make sure that no one else has already mapped that page */
-			if (pte_none(READ_ONCE(*ptep)))
-				set_pte_safe(ptep, mk_pte(meta_page, PAGE_KERNEL));
-			else
-				__free_page(meta_page);
-		}
-		spin_unlock_irqrestore(&slub_valloc_lock, flags);
-	}
-
-	/* Ensure we have pagetables for the data range. */
-	for (addr = ALIGN_DOWN(data_range_start, PAGE_SIZE);
-	     addr < data_range_end; addr += PAGE_SIZE) {
-		pte_t *ptep = slub_get_ptep(addr, gfp_flags, true);
-
-		if (ptep == NULL)
-			return NULL;
-	}
-
-	/* Did we race with someone else who made forward progress? */
-	spin_lock_irqsave(&slub_valloc_lock, flags);
-	if (old_base != slub_addr_base)
-		goto retry_locked;
-
-	/* Success! Grab the range for ourselves. */
-	slub_addr_base = data_range_end;
-	spin_unlock_irqrestore(&slub_valloc_lock, flags);
-
-	/* Initialize basic slub metadata for virt_to_slab() */
-	for (unsigned long i = 0; i < (1UL << order); i++)
-		((struct slab *)(meta_range_start + i*STRUCT_SLAB_SIZE))->compound_slab_head = (struct slab *)meta_range_start;
-
-	slab = (struct slab *)meta_range_start;
-	spin_lock_init(&slab->slab_lock);
-	atomic_set(&slab->pinstate, SLAB_PINSTATE_UNPOPULATED);
-
-	return slab;
-}
 #endif /* CONFIG_SLAB_VIRTUAL */
 
 /*
@@ -2224,47 +2124,161 @@ static bool is_slab_pinned_racy(struct slab *slab)
 	return pinstate == SLAB_PINSTATE_PINNED;
 }
 
-/* Get an unused slab, or allocate a new one */
-static struct slab *get_slab(struct kmem_cache *s,
-	struct list_head *freed_slabs, struct kmem_cache_order_objects oo,
-	gfp_t meta_gfp_flags)
+static struct slab *alloc_slab(struct kmem_cache *s, struct kmem_cache_order_objects oo, gfp_t gfp_flags_meta, gfp_t gfp_flags_data, int node)
 {
 	unsigned long flags;
-	struct slab *slab;
+	unsigned long old_base;
+	unsigned long data_range_start, data_range_end;
+	unsigned long meta_range_start, meta_range_last;
+	unsigned long addr;
+	pmd_t *pmdp;
+	struct slab *new_slabs;
+	struct folio *data_folio;
+	unsigned int order = oo_order(oo);
 
-	spin_lock_irqsave(&s->freed_slabs_lock, flags);
-	slab = list_first_entry_or_null(freed_slabs, struct slab, slab_list);
+	BUG_ON(order > PMD_ORDER);
 
-	if (likely(slab)) {
-		list_del(&slab->slab_list);
-		if (!is_slab_pinned(slab))
-			WRITE_ONCE(s->nr_freed_pages,
-				s->nr_freed_pages - (1UL<<slab_order(slab)));
+	gfp_flags_meta &= (__GFP_HIGH | __GFP_RECLAIM | __GFP_IO |
+		      __GFP_FS | __GFP_NOWARN | __GFP_RETRY_MAYFAIL |
+		      __GFP_NOFAIL | __GFP_NORETRY | __GFP_MEMALLOC |
+		      __GFP_NOMEMALLOC);
 
-		spin_unlock_irqrestore(&s->freed_slabs_lock, flags);
-		return slab;
-	}
+	/* new pagetables and metadata pages should be zeroed */
+	gfp_flags_meta |= __GFP_ZERO;
 
-	spin_unlock_irqrestore(&s->freed_slabs_lock, flags);
-	slab = alloc_slab_meta(oo_order(oo), meta_gfp_flags);
-	if (slab == NULL)
+	/* Allocate memory for the data range */
+	gfp_flags_data |= __GFP_ZERO;
+	if (node == NUMA_NO_NODE)
+		data_folio = folio_alloc(gfp_flags_data, PMD_ORDER);
+	else
+		data_folio = __folio_alloc_node(gfp_flags_data, PMD_ORDER, node);
+
+	if (data_folio == NULL)
 		return NULL;
 
+	/* Reserve a portion of the data range */
+	spin_lock_irqsave(&slub_valloc_lock, flags);
+retry_locked:
+	old_base = slub_addr_base;
 	/*
-	 * Bits that must be equal to start-of-slab address for all
-	 * objects inside the slab.
-	 * For compatibility with pointer tagging (like in HWASAN), this would
-	 * need to clear the pointer tag bits from the mask.
+	 * We drop the lock. The following code might sleep during
+	 * pagetable allocation. Any mutations we make before rechecking
+	 * slub_addr_base are idempotent, so that's fine.
 	 */
-	slab->align_mask = ~((PAGE_SIZE<<oo_order(oo)) - 1);
+	spin_unlock_irqrestore(&slub_valloc_lock, flags);
 
-	/* object alignment bits (must be zero, which is equal to the bits in
-	 * the start-of-slab address)
-	 */
-	if (s->red_left_pad == 0)
-		slab->align_mask |= (1 << (ffs(s->size)-1)) - 1;
+	/* Reserve a PMD-sized region */
+	data_range_start = old_base;
+	data_range_end = data_range_start + PMD_SIZE;
+	BUG_ON(!IS_ALIGNED(data_range_start, PMD_SIZE));
+	BUG_ON(data_range_start < SLAB_BASE_ADDR || data_range_end < SLAB_BASE_ADDR);
 
-	return slab;
+	/* We ran out of virtual memory for slabs */
+	if (data_range_start >= SLAB_END_ADDR || data_range_end >= SLAB_END_ADDR)
+		goto out_free_data_page;
+
+	meta_range_start = (unsigned long)virt_to_slab_raw(data_range_start);
+	meta_range_last = meta_range_start + sizeof(struct slab) * ((PMD_SIZE / PAGE_SIZE) - 1);
+
+	/* Ensure the meta address range is mapped. */
+	for (addr = ALIGN_DOWN(meta_range_start, PMD_SIZE); addr <= (unsigned long)meta_range_last + (sizeof(struct slab) - 1); addr += PMD_SIZE) {
+		pmdp = slub_get_pmdp(addr, gfp_flags_meta, true);
+		if (pmdp == NULL)
+			goto out_free_data_page;
+
+		spin_lock_irqsave(&slub_valloc_lock, flags);
+		if (pmd_none(READ_ONCE(*pmdp))) {
+			/* Allocate a page of physical memory for the metadata */
+			struct page *meta_page;
+			spin_unlock_irqrestore(&slub_valloc_lock, flags);
+
+			meta_page = alloc_pages(gfp_flags_meta, PMD_ORDER);
+			if (meta_page == NULL)
+				goto out_free_data_page;
+
+			spin_lock_irqsave(&slub_valloc_lock, flags);
+			/* Make sure that no one else has already mapped that page */
+			if (pmd_none(READ_ONCE(*pmdp))) {
+				// pr_info("alloc_slab: mapping meta %px\n", addr);
+				set_pmd_safe(pmdp, mk_pmd(meta_page, PAGE_KERNEL_LARGE));
+			} else {
+				__free_page(meta_page);
+			}
+		}
+		spin_unlock_irqrestore(&slub_valloc_lock, flags);
+	}
+
+	/* Make sure that we have page tables for the data range */
+	pmdp = slub_get_pmdp(data_range_start, gfp_flags_meta, true);
+	if (pmdp == NULL)
+		goto out_free_data_page;
+
+	/* Did we race with someone else who made forward progress? */
+	spin_lock_irqsave(&slub_valloc_lock, flags);
+	if (old_base != slub_addr_base)
+		goto retry_locked;
+
+	/* Success! Grab the range for ourselves. */
+	slub_addr_base = data_range_end;
+	spin_unlock_irqrestore(&slub_valloc_lock, flags);
+
+	__folio_set_slab(data_folio);
+	/* Make the flag visible before any changes to folio->mapping */
+	smp_wmb();
+
+	/* wire up physical folio */
+	// pr_info("alloc_slab: mapping data %px to %#llx\n", data_range_start, page_to_phys(folio_page(data_folio, 0)));
+	BUG_ON(pmd_present(*pmdp));
+	set_pmd_safe(pmdp, mk_pmd((struct page *)data_folio, PAGE_KERNEL_LARGE));
+
+	/* Initialize the newly-created slabs */
+	new_slabs = (struct slab *)meta_range_start;
+	data_folio->slab = &new_slabs[0];
+	for (unsigned int ii = 0; ii < (1UL << PMD_ORDER); ii += (1UL << order)) {
+		struct slab *slab = &new_slabs[ii];
+
+		for (unsigned long i = 0; i < 1UL << order; i++) {
+			struct slab *s = &slab[i];
+			s->compound_slab_head = slab;
+		}
+
+		spin_lock_init(&slab->slab_lock);
+		atomic_set(&slab->pinstate, SLAB_PINSTATE_POPULATED);
+
+		slab->oo = oo;
+
+		// Is it valid when multiple slabs point to the same folio?
+		slab->backing_folio = data_folio;
+
+		/*
+		* Bits that must be equal to start-of-slab address for all
+		* objects inside the slab.
+		* For compatibility with pointer tagging (like in HWASAN), this would
+		* need to clear the pointer tag bits from the mask.
+		*/
+		slab->align_mask = ~((PAGE_SIZE << order) - 1);
+
+		/* object alignment bits (must be zero, which is equal to the bits in
+		* the start-of-slab address)
+		*/
+		if (s->red_left_pad == 0)
+			slab->align_mask |= (1 << (ffs(s->size)-1)) - 1;
+
+		if (folio_is_pfmemalloc(data_folio))
+			slab_set_pfmemalloc(slab);
+	}
+
+	/* Add the newly-created slabs except the first to the freelist */
+	spin_lock_irqsave(&s->freed_slabs_lock, flags);
+	for (unsigned int i = 1UL << order; i < (1UL << PMD_ORDER); i += (1UL << order))
+		list_add(&new_slabs[i].slab_list, &s->freed_slabs_normal);
+	spin_unlock_irqrestore(&s->freed_slabs_lock, flags);
+
+	return &new_slabs[0];
+
+out_free_data_page:
+	__free_pages((struct page *)data_folio, PMD_ORDER);
+	return NULL;
 }
 
 /*
@@ -2276,66 +2290,21 @@ static struct slab *alloc_slab_page(struct kmem_cache *s,
 		struct list_head *freed_slabs,
 		struct kmem_cache_order_objects oo)
 {
-	struct folio *folio;
-	struct slab *slab;
-	unsigned int order = oo_order(oo);
 	unsigned long flags;
-	void *virt_mapping;
-	pte_t *ptep;
+	struct slab *slab;
 
-	slab = get_slab(s, freed_slabs, oo, meta_gfp_flags);
-
-	/* Get a corresponding physical page. */
-	if (!is_slab_pinned(slab)) {
-		/*
-		 * Avoid making UAF reads easily exploitable by repopulating
-		 * with pages containing attacker-controller data - always zero
-		 * pages.
-		 */
-		gfp_flags |= __GFP_ZERO;
-		if (node == NUMA_NO_NODE)
-			folio = (struct folio *)alloc_pages(gfp_flags, order);
-		else
-			folio = (struct folio *)__alloc_pages_node(node, gfp_flags, order);
-
-		if (!folio) {
-			/* Rollback: put the struct slab back. */
-			spin_lock_irqsave(&s->freed_slabs_lock, flags);
-			list_add(&slab->slab_list, freed_slabs);
-			spin_unlock_irqrestore(&s->freed_slabs_lock, flags);
-
-			return NULL;
-		}
-		folio->slab = slab;
-		__folio_set_slab(folio);
-
-		slab->backing_folio = folio;
-		slab->oo = oo;
-
-		/* Make the flag visible before any changes to folio->mapping */
-		smp_wmb();
-		if (folio_is_pfmemalloc(folio))
-			slab_set_pfmemalloc(slab);
-		else
-			slab_clear_pfmemalloc(slab);
-	} else {
-		folio = slab->backing_folio;
+	/* If there is already a slab in the current cache's freelist then use that */
+	spin_lock_irqsave(&s->freed_slabs_lock, flags);
+	slab = list_first_entry_or_null(freed_slabs, struct slab, slab_list);
+	if (likely(slab)) {
+		list_del(&slab->slab_list);
+		spin_unlock_irqrestore(&s->freed_slabs_lock, flags);
+		return slab;
 	}
+	spin_unlock_irqrestore(&s->freed_slabs_lock, flags);
 
-	virt_mapping = slab_to_virt(slab);
-
-	/* wire up physical folio */
-	smp_wmb(); /* order page zeroing with PTE setup */
-	for (unsigned long i = 0; i < (1UL << oo_order(oo)); i++) {
-		ptep = slub_get_ptep((unsigned long)virt_mapping + i*PAGE_SIZE, 0, false);
-		BUG_ON(pte_present(*ptep));
-		set_pte_safe(ptep, mk_pte(folio_page(folio, i), PAGE_KERNEL));
-	}
-
-	if (!is_slab_pinned(slab))
-		atomic_set(&slab->pinstate, SLAB_PINSTATE_POPULATED);
-
-	return slab;
+	/* Otherwise allocate new slabs */
+	return alloc_slab(s, oo, meta_gfp_flags, gfp_flags, node);
 }
 
 struct page *virt_to_head_page_noderef(void *virt_ptr)
@@ -2372,7 +2341,12 @@ unsigned long slab_virt_to_phys(unsigned long x)
 		}
 	}
 
-	return page_to_phys(folio_page(f, 0)) + (x - (unsigned long)slab_to_virt(slab));
+	if(folio_size(f) != PMD_SIZE) {
+		pr_emerg("Slab with folio of size %#zx (phys %#llx)\n", folio_size(f), page_to_phys(folio_page(f, 0)));
+		BUG();
+	}
+
+	return page_to_phys(folio_page(f, 0)) + offset_in_folio(f, x);
 }
 EXPORT_SYMBOL(slab_virt_to_phys);
 
@@ -2396,29 +2370,34 @@ EXPORT_SYMBOL(slab_virt_to_phys);
  */
 void *slab_phys_to_virt(unsigned long phys)
 {
+	struct slab *slab;
+	int slab_pinstate;
+	size_t page_idx;
+	unsigned long slab_raw;
+	void *ret;
+
 	struct page *p = pfn_to_page(PFN_DOWN(phys));
 	struct folio *f = page_folio(p); /* racy, folio might detach */
+
+	if (folio_size(f) != PMD_SIZE)
+		goto not_slab;
+
 	/*
 	 * Might be reading non-live union field, could be mapping or compound
 	 * mapcount/pincount!
 	 */
-	unsigned long slab_raw = (unsigned long)READ_ONCE(f->slab);
-	struct slab *slab;
-	int slab_pinstate;
-	size_t page_idx;
+	 /* f->slab points to the first slab in the 2M folio */
+	slab_raw = (unsigned long)READ_ONCE(f->slab) + ((offset_in_folio(f, phys) / PAGE_SIZE) * sizeof(struct slab));
 
 	if (slab_raw < SLAB_BASE_ADDR || slab_raw >= SLAB_DATA_BASE_ADDR ||
-			(slab_raw - SLAB_BASE_ADDR) % STRUCT_SLAB_SIZE != 0)
+			(slab_raw - SLAB_BASE_ADDR) % sizeof(struct slab) != 0)
 		goto not_slab;
+
 	slab = (struct slab *)slab_raw;
+
 	slab_pinstate = atomic_read(&slab->pinstate);
 	if (slab_pinstate != SLAB_PINSTATE_POPULATED &&
 	    slab_pinstate != SLAB_PINSTATE_PINNED)
-		goto not_slab;
-
-	/* ensure the target page was really part of the compound page */
-	page_idx = p - folio_page(f, 0);
-	if (p - folio_page(f, 0) >= slab->oo.x)
 		goto not_slab;
 
 	/* try to pin the slab to make the translation stable */
@@ -2436,7 +2415,12 @@ void *slab_phys_to_virt(unsigned long phys)
 	 * Alright, we're sure we can translate this into a SLUB-virtual
 	 * address at this point.
 	 */
-	return slab_to_virt(slab) + PAGE_SIZE * page_idx + offset_in_page(phys);
+	page_idx = folio_page_idx(f, p);
+	ret = slab_to_virt(slab) + PAGE_SIZE * page_idx + offset_in_page(phys);
+
+	// pr_info("slab_phys_to_virt: phys addr %#llx is %p\n", phys, ret);
+
+	return ret;
 
 not_slab:
 	pr_warn("%s(0x%lx): decided not slab (racy?)\n", __func__, phys);
@@ -2583,18 +2567,8 @@ static struct slab *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 
 	slab = alloc_slab_page(s, flags, alloc_gfp, node, &s->freed_slabs_normal, oo);
 
-	if (unlikely(!slab)) {
-		oo = s->min;
-		alloc_gfp = flags;
-		/*
-		 * Allocation may have failed due to fragmentation.
-		 * Try a lower order alloc if possible
-		 */
-		slab = alloc_slab_page(s, flags, flags, node, &s->freed_slabs_min, oo);
-		if (unlikely(!slab))
-			return NULL;
-		stat(s, ORDER_FALLBACK);
-	}
+	if (unlikely(!slab))
+		return NULL;
 
 	slab->objects = oo_objects(oo);
 	slab->inuse = 0;
@@ -2702,50 +2676,31 @@ static DEFINE_KTHREAD_WORK(slub_tlbflush_work, slub_tlbflush_worker);
 
 static void __free_slab(struct kmem_cache *s, struct slab *slab)
 {
+#ifndef CONFIG_SLAB_VIRTUAL
 	int pages;
-#ifdef CONFIG_SLAB_VIRTUAL
-	int order = oo_order(slab->oo);
-	unsigned long irq_flags;
-
-	/* Mark the slab as unpopulated unless it was pinned. */
-	atomic_cmpxchg(&slab->pinstate, SLAB_PINSTATE_POPULATED,
-		       SLAB_PINSTATE_UNPOPULATED);
-
-	for (unsigned long i = 0; i < (1UL << order); i++) {
-		unsigned long addr = (unsigned long)slab_address(slab) + i*PAGE_SIZE;
-		pte_t *ptep = slub_get_ptep(addr, 0, false);
-
-		BUG_ON(!pte_present(*ptep));
-		ptep_clear(&init_mm, addr, ptep);
-	}
-#else
 	struct folio *folio = slab_folio(slab);
 	int order = folio_order(folio);
-#endif /* CONFIG_SLAB_VIRTUAL */
 	pages = 1 << order;
 
 	__slab_clear_pfmemalloc(slab);
-
-#ifndef CONFIG_SLAB_VIRTUAL
 	folio->mapping = NULL;
 	/* Make the mapping reset visible before clearing the flag */
 	smp_wmb();
 	__folio_clear_slab(folio);
-#endif
 
 	if (current->reclaim_state)
 		current->reclaim_state->reclaimed_slab += pages;
 	unaccount_slab(slab, order, s);
 
-#ifdef CONFIG_SLAB_VIRTUAL
-	spin_lock_irqsave(&slub_kworker_lock, irq_flags);
-	list_add(&slab->flush_list_elem, &slub_tlbflush_queue);
-	spin_unlock_irqrestore(&slub_kworker_lock, irq_flags);
-	if (READ_ONCE(slub_kworker) != NULL)
-		kthread_queue_work(slub_kworker, &slub_tlbflush_work);
-#else
 	__free_pages(folio_page(folio, 0), order);
-#endif /* CONFIG_SLAB_VIRTUAL */
+
+#else
+	unsigned long irq_flags;
+
+	spin_lock_irqsave(&s->freed_slabs_lock, irq_flags);
+	list_add(&slab->slab_list, &s->freed_slabs_normal);
+	spin_unlock_irqrestore(&s->freed_slabs_lock, irq_flags);
+#endif
 }
 
 static void rcu_free_slab(struct rcu_head *h)

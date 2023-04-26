@@ -1295,6 +1295,7 @@ static void __init preallocate_top_level_entries_range(unsigned long start, unsi
 		p4d_t *p4d;
 		pud_t *pud;
 
+		// When 5 level paging is not enabled this just returns (p4d_t *)pgd
 		lvl = "p4d";
 		p4d = p4d_alloc(&init_mm, pgd, addr);
 		if (!p4d)
@@ -1313,6 +1314,7 @@ static void __init preallocate_top_level_entries_range(unsigned long start, unsi
 		 * to the pud _software_ level to ensure the second
 		 * hardware level is allocated on 4-level systems too.
 		 */
+		// This allocates a PUD and makes the pml4e point to it
 		lvl = "pud";
 		pud = pud_alloc(&init_mm, p4d, addr);
 		if (!pud)

@@ -139,7 +139,7 @@ void __init kernel_randomize_memory(void)
 
 #ifdef CONFIG_SLAB_VIRTUAL
 	prandom_bytes_state(&rand_state, &rand, sizeof(rand));
-	slub_addr_base += (rand & ((1UL << 36) - PAGE_SIZE));
+	slub_addr_base += (rand & ((1UL << 36) - PMD_SIZE));
 #endif
 }
 

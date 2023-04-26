@@ -129,8 +129,8 @@ struct slab {
 };
 
 #ifdef CONFIG_SLAB_VIRTUAL
-// TODO get rid of this
-static_assert(sizeof(struct slab) != STRUCT_SLAB_SIZE);
+/* TODO get rid of this */
+static_assert(sizeof(struct slab) == STRUCT_SLAB_SIZE);
 #endif
 
 /* See comment for __page_flags above. */
@@ -157,6 +157,13 @@ static_assert(IS_ALIGNED(offsetof(struct slab, freelist), 2*sizeof(void *)));
 
 #ifdef CONFIG_SLAB_VIRTUAL
 #define slab_folio_unsafe(s) (s->backing_folio)
+// static inline struct folio *slab_folio_unsafe(const struct slab *s)
+// {
+// 	BUG_ON(!s);
+// 	BUG_ON(!s->backing_folio);
+
+// 	return s->backing_folio;
+// }
 #define is_slab_page(s) ((unsigned long)(s) >= SLAB_BASE_ADDR && (unsigned long)(s) < SLAB_DATA_BASE_ADDR)
 static_assert(__alignof__(struct slab) == 16);
 #else

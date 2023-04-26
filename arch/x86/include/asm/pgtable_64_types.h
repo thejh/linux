@@ -206,10 +206,16 @@ extern unsigned int ptrs_per_p4d;
 #define SLAB_END_ADDR		(SLAB_BASE_ADDR + P4D_SIZE)
 
 /* TODO get rid of this */
-#define STRUCT_SLAB_SIZE (24 * sizeof(void *))
+#define STRUCT_SLAB_SIZE (14 * sizeof(void *))
+
+/* How many page-sized regions we need to cover the SLAB range*/
 #define SLAB_VPAGES ((SLAB_END_ADDR - SLAB_BASE_ADDR) / PAGE_SIZE)
-#define SLAB_META_SIZE ALIGN(SLAB_VPAGES * STRUCT_SLAB_SIZE, PAGE_SIZE)
+
+/* The size of the SLAB meta region. There is 1 struct slab per page-sized region */
+#define SLAB_META_SIZE ALIGN(SLAB_VPAGES * STRUCT_SLAB_SIZE, PMD_SIZE)
+
 #define SLAB_DATA_BASE_ADDR (SLAB_BASE_ADDR + SLAB_META_SIZE)
+
 #define is_slab_addr(ptr) ((unsigned long)(ptr) >= SLAB_DATA_BASE_ADDR && \
 	(unsigned long)(ptr) < SLAB_END_ADDR)
 #define is_slab_meta(ptr) ((unsigned long)(ptr) >= SLAB_BASE_ADDR && \
