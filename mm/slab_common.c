@@ -1063,7 +1063,7 @@ void kfree(const void *object)
 		return;
 
 	folio = virt_to_folio(object);
-	if (unlikely(!folio_test_slab(folio))) {
+	if (unlikely(!is_slab_addr(object))) {
 		free_large_kmalloc(folio, (void *)object);
 		return;
 	}
@@ -1094,8 +1094,7 @@ size_t __ksize(const void *object)
 		return 0;
 
 	folio = virt_to_folio(object);
-
-	if (unlikely(!folio_test_slab(folio))) {
+	if (unlikely(!is_slab_addr(object))) {
 		if (WARN_ON(folio_size(folio) <= KMALLOC_MAX_CACHE_SIZE))
 			return 0;
 		if (WARN_ON(object != folio_address(folio)))

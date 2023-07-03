@@ -169,6 +169,15 @@ static_assert(IS_ALIGNED(offsetof(struct slab, freelist), sizeof(freelist_aba_t)
  */
 #define slab_page(s) folio_page(slab_folio(s), 0)
 
+/**
+ * is_slab_page - Checks if a page is really a slab page
+ * @s: The slab
+ *
+ * Checks if s points to a slab page.
+ *
+ * Return: true if s points to a slab and false otherwise.
+ */
+#define is_slab_page(s) folio_test_slab(slab_folio(s))
 /*
  * If network-based swap is enabled, sl*b must keep track of whether pages
  * were allocated from pfmemalloc reserves.
