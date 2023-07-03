@@ -16,6 +16,11 @@ unsigned long __phys_addr(unsigned long x)
 {
 	unsigned long y = x - __START_KERNEL_map;
 
+#ifdef CONFIG_SLAB_VIRTUAL
+	if (is_slab_addr(x))
+		return slab_virt_to_phys(x);
+#endif
+
 	/* use the carry flag to determine if x was < __START_KERNEL_map */
 	if (unlikely(x > y)) {
 		x = y + phys_base;
@@ -47,6 +52,11 @@ EXPORT_SYMBOL(__phys_addr_symbol);
 bool __virt_addr_valid(unsigned long x)
 {
 	unsigned long y = x - __START_KERNEL_map;
+
+#ifdef CONFIG_SLAB_VIRTUAL
+	if (is_slab_addr(x))
+		return true;
+#endif
 
 	/* use the carry flag to determine if x was < __START_KERNEL_map */
 	if (unlikely(x > y)) {
