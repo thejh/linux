@@ -1407,7 +1407,7 @@ static int check_slab(struct kmem_cache *s, struct slab *slab)
 {
 	int maxobj;
 
-	if (!folio_test_slab(slab_folio(slab))) {
+	if (!is_slab_page(slab)) {
 		slab_err(s, slab, "Not a valid slab page");
 		return 0;
 	}
@@ -1594,7 +1594,7 @@ static noinline bool alloc_debug_processing(struct kmem_cache *s,
 	return true;
 
 bad:
-	if (folio_test_slab(slab_folio(slab))) {
+	if (is_slab_page(slab)) {
 		/*
 		 * If this is a slab page then lets do the best we can
 		 * to avoid issues in the future. Marking all objects
@@ -1624,7 +1624,7 @@ static inline int free_consistency_checks(struct kmem_cache *s,
 		return 0;
 
 	if (unlikely(s != slab->slab_cache)) {
-		if (!folio_test_slab(slab_folio(slab))) {
+		if (!is_slab_page(slab)) {
 			slab_err(s, slab, "Attempt to free object(0x%p) outside of slab",
 				 object);
 		} else if (!slab->slab_cache) {
@@ -4717,7 +4717,7 @@ void kfree(const void *object)
 		return;
 
 	folio = virt_to_folio(object);
-	if (unlikely(!folio_test_slab(folio))) {
+	if (unlikely(!is_slab_addr(object))) {
 		free_large_kmalloc(folio, (void *)object);
 		return;
 	}
