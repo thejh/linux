@@ -166,6 +166,10 @@
  * 			the fast path and disables lockless freelists.
  */
 
+#ifdef CONFIG_SLAB_VIRTUAL
+unsigned long slub_addr_base = SLAB_DATA_BASE_ADDR;
+#endif /* CONFIG_SLAB_VIRTUAL */
+
 /*
  * We could simply use migrate_disable()/enable() but as long as it's a
  * function call even on !PREEMPT_RT, use inline preempt_disable() there.
