@@ -1532,6 +1532,7 @@ static noinline void __init kernel_init_freeable(void)
 	workqueue_init();
 
 	init_mm_internals();
+	init_slub_page_reclaim();
 
 	rcu_init_tasks_generic();
 	do_pre_smp_initcalls();
