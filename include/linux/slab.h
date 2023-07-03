@@ -793,4 +793,5 @@ int slab_dead_cpu(unsigned int cpu);
 #define slab_dead_cpu		NULL
 #endif
 
+#define is_slab_addr(addr) folio_test_slab(virt_to_folio(addr))
 #endif	/* _LINUX_SLAB_H */
