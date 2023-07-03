@@ -158,7 +158,7 @@ static void free_resource(struct resource *res)
 	 * buddy and trying to be smart and reusing them eventually in
 	 * alloc_resource() overcomplicates resource handling.
 	 */
-	if (res && PageSlab(virt_to_head_page(res)))
+	if (res && is_slab_addr(res))
 		kfree(res);
 }
 
