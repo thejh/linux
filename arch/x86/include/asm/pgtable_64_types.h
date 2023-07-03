@@ -6,6 +6,7 @@
 
 #ifndef __ASSEMBLY__
 #include <linux/types.h>
+#include <linux/align.h>
 #include <asm/kaslr.h>
 
 /*
@@ -198,6 +199,21 @@ extern unsigned int ptrs_per_p4d;
 
 #define ESPFIX_PGD_ENTRY	_AC(-2, UL)
 #define ESPFIX_BASE_ADDR	(ESPFIX_PGD_ENTRY << P4D_SHIFT)
+
+#ifdef CONFIG_SLAB_VIRTUAL
+#define SLAB_PGD_ENTRY		_AC(-3, UL)
+#define SLAB_BASE_ADDR		(SLAB_PGD_ENTRY << P4D_SHIFT)
+#define SLAB_END_ADDR		(SLAB_BASE_ADDR + P4D_SIZE)
+
+/*
+ * We need to define this here because we need it to compute SLAB_META_SIZE
+ * and including slab.h causes a dependency cycle.
+ */
+#define STRUCT_SLAB_SIZE (32 * sizeof(void *))
+#define SLAB_VPAGES ((SLAB_END_ADDR - SLAB_BASE_ADDR) / PAGE_SIZE)
+#define SLAB_META_SIZE ALIGN(SLAB_VPAGES * STRUCT_SLAB_SIZE, PAGE_SIZE)
+#define SLAB_DATA_BASE_ADDR (SLAB_BASE_ADDR + SLAB_META_SIZE)
+#endif /* CONFIG_SLAB_VIRTUAL */
 
 #define CPU_ENTRY_AREA_PGD	_AC(-4, UL)
 #define CPU_ENTRY_AREA_BASE	(CPU_ENTRY_AREA_PGD << P4D_SHIFT)
