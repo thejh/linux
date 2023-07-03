@@ -1064,6 +1064,10 @@ void kfree(const void *object)
 
 	if (unlikely(!is_slab_addr(object))) {
 		folio = virt_to_folio(object);
+		if (IS_ENABLED(CONFIG_SLAB_VIRTUAL) &&
+			CHECK_DATA_CORRUPTION(folio_test_slab(folio),
+			"unexpected slab page mapped outside slab range"))
+			return;
 		free_large_kmalloc(folio, (void *)object);
 		return;
 	}

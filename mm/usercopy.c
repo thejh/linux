@@ -189,9 +189,19 @@ static inline void check_heap_object(const void *ptr, unsigned long n,
 	if (!virt_addr_valid(ptr))
 		return;
 
+	/*
+	 * We need to check this first because when CONFIG_SLAB_VIRTUAL is
+	 * enabled a slab address might not be backed by a folio.
+	 */
+	if (IS_ENABLED(CONFIG_SLAB_VIRTUAL) && is_slab_addr(ptr)) {
+		/* Check slab allocator for flags and size. */
+		__check_heap_object(ptr, n, virt_to_slab(ptr), to_user);
+		return;
+	}
+
 	folio = virt_to_folio(ptr);
 
-	if (folio_test_slab(folio)) {
+	if (!IS_ENABLED(CONFIG_SLAB_VIRTUAL) && folio_test_slab(folio)) {
 		/* Check slab allocator for flags and size. */
 		__check_heap_object(ptr, n, folio_slab(folio), to_user);
 	} else if (folio_test_large(folio)) {
