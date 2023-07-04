@@ -48,6 +48,15 @@ typedef union {
 	freelist_full_t full;
 } freelist_aba_t;
 
+/*
+ * Word size structure that can be atomically updated or read and that
+ * contains both the order and the number of objects that a slab of the
+ * given order would contain.
+ */
+struct kmem_cache_order_objects {
+	unsigned int x;
+};
+
 /* Reuses the bits in struct page */
 struct slab {
 	unsigned long __page_flags;
@@ -220,6 +229,19 @@ static inline struct slab *virt_to_slab(const void *addr)
 	return folio_slab(folio);
 }
 
+#define OO_SHIFT	16
+#define OO_MASK		((1 << OO_SHIFT) - 1)
+
+static inline unsigned int oo_order(struct kmem_cache_order_objects x)
+{
+	return x.x >> OO_SHIFT;
+}
+
+static inline unsigned int oo_objects(struct kmem_cache_order_objects x)
+{
+	return x.x & OO_MASK;
+}
+
 static inline int slab_order(const struct slab *slab)
 {
 	return folio_order(slab_folio(slab));
@@ -246,15 +268,6 @@ static inline size_t slab_size(const struct slab *slab)
 
 #define slub_percpu_partial_read_once(c)	NULL
 #endif // CONFIG_SLUB_CPU_PARTIAL
-
-/*
- * Word size structure that can be atomically updated or read and that
- * contains both the order and the number of objects that a slab of the
- * given order would contain.
- */
-struct kmem_cache_order_objects {
-	unsigned int x;
-};
 
 /*
  * Slab cache management.
