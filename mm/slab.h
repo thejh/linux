@@ -79,6 +79,14 @@ struct slab {
 
 	struct list_head flush_list_elem;
 
+	/*
+	 * Not in kmem_cache because it depends on whether the allocation is
+	 * normal order or fallback order.
+	 * an alternative might be to over-allocate virtual memory for
+	 * fallback-order pages.
+	 */
+	unsigned long align_mask;
+
 	/* Replaces the page lock */
 	spinlock_t slab_lock;
 
