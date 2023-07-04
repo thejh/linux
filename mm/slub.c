@@ -4512,6 +4512,13 @@ static int calculate_sizes(struct kmem_cache *s)
 
 static int kmem_cache_open(struct kmem_cache *s, slab_flags_t flags)
 {
+#ifdef CONFIG_SLAB_VIRTUAL
+	/* WARNING: this stuff will be relocated in bootstrap()! */
+	spin_lock_init(&s->freed_slabs_lock);
+	INIT_LIST_HEAD(&s->freed_slabs);
+	INIT_LIST_HEAD(&s->freed_slabs_min);
+#endif
+
 	s->flags = kmem_cache_flags(s->size, flags, s->name);
 #ifdef CONFIG_SLAB_FREELIST_HARDENED
 	s->random = get_random_long();
@@ -5001,6 +5008,12 @@ static struct kmem_cache * __init bootstrap(struct kmem_cache *static_cache)
 	struct kmem_cache_node *n;
 
 	memcpy(s, static_cache, kmem_cache->object_size);
+#ifdef CONFIG_SLAB_VIRTUAL
+	INIT_LIST_HEAD(&s->freed_slabs);
+	INIT_LIST_HEAD(&s->freed_slabs_min);
+	list_splice(&static_cache->freed_slabs, &s->freed_slabs);
+	list_splice(&static_cache->freed_slabs_min, &s->freed_slabs_min);
+#endif
 
 	/*
 	 * This runs very early, and only the boot processor is supposed to be
