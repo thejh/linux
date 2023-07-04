@@ -29,6 +29,10 @@ static void test_clobber_zone(struct kunit *test)
 #ifndef CONFIG_KASAN
 static void test_next_pointer(struct kunit *test)
 {
+	if (IS_ENABLED(CONFIG_SLAB_VIRTUAL))
+		kunit_skip(test,
+			"incompatible with freepointer corruption detection in CONFIG_SLAB_VIRTUAL");
+
 	struct kmem_cache *s = kmem_cache_create("TestSlub_next_ptr_free", 64, 0,
 				SLAB_POISON|SLAB_NO_USER_FLAGS, NULL);
 	u8 *p = kmem_cache_alloc(s, GFP_KERNEL);
