@@ -84,15 +84,6 @@ struct kmem_cache_cpu {
 #endif // CONFIG_SLUB_CPU_PARTIAL
 
 /*
- * Word size structure that can be atomically updated or read and that
- * contains both the order and the number of objects that a slab of the
- * given order would contain.
- */
-struct kmem_cache_order_objects {
-	unsigned int x;
-};
-
-/*
  * Slab cache management.
  */
 struct kmem_cache {
