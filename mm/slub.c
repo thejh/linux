@@ -4510,8 +4510,20 @@ static int calculate_sizes(struct kmem_cache *s)
 	return !!oo_objects(s->oo);
 }
 
+static inline void slab_virtual_open(struct kmem_cache *s)
+{
+#ifdef CONFIG_SLAB_VIRTUAL
+	/* WARNING: this stuff will be relocated in bootstrap()! */
+	spin_lock_init(&s->virtual.freed_slabs_lock);
+	INIT_LIST_HEAD(&s->virtual.freed_slabs);
+	INIT_LIST_HEAD(&s->virtual.freed_slabs_min);
+#endif
+}
+
 static int kmem_cache_open(struct kmem_cache *s, slab_flags_t flags)
 {
+	slab_virtual_open(s);
+
 	s->flags = kmem_cache_flags(s->size, flags, s->name);
 #ifdef CONFIG_SLAB_FREELIST_HARDENED
 	s->random = get_random_long();
@@ -4994,6 +5006,16 @@ static int slab_memory_callback(struct notifier_block *self,
  * that may be pointing to the wrong kmem_cache structure.
  */
 
+static inline void slab_virtual_bootstrap(struct kmem_cache *s, struct kmem_cache *static_cache)
+{
+	slab_virtual_open(s);
+
+#ifdef CONFIG_SLAB_VIRTUAL
+	list_splice(&static_cache->virtual.freed_slabs, &s->virtual.freed_slabs);
+	list_splice(&static_cache->virtual.freed_slabs_min, &s->virtual.freed_slabs_min);
+#endif
+}
+
 static struct kmem_cache * __init bootstrap(struct kmem_cache *static_cache)
 {
 	int node;
@@ -5001,6 +5023,7 @@ static struct kmem_cache * __init bootstrap(struct kmem_cache *static_cache)
 	struct kmem_cache_node *n;
 
 	memcpy(s, static_cache, kmem_cache->object_size);
+	slab_virtual_bootstrap(s, static_cache);
 
 	/*
 	 * This runs very early, and only the boot processor is supposed to be

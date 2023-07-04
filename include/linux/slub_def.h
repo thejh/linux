@@ -86,6 +86,20 @@ struct kmem_cache_cpu {
 /*
  * Slab cache management.
  */
+struct kmem_cache_virtual {
+#ifdef CONFIG_SLAB_VIRTUAL
+	/* Protects freed_slabs and freed_slabs_min */
+	spinlock_t freed_slabs_lock;
+	/*
+	 * Slabs on this list have virtual memory of size oo allocated to them
+	 * but no physical memory
+	 */
+	struct list_head freed_slabs;
+	/* Same as freed_slabs but with memory of size min */
+	struct list_head freed_slabs_min;
+#endif
+};
+
 struct kmem_cache {
 #ifndef CONFIG_SLUB_TINY
 	struct kmem_cache_cpu __percpu *cpu_slab;
@@ -107,6 +121,8 @@ struct kmem_cache {
 
 	/* Allocation and freeing of slabs */
 	struct kmem_cache_order_objects min;
+	struct kmem_cache_virtual virtual;
+
 	gfp_t allocflags;	/* gfp flags to use on each alloc */
 	int refcount;		/* Refcount for slab cache destroy */
 	void (*ctor)(void *);
