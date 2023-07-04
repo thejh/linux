@@ -2110,6 +2110,9 @@ static struct slab *get_free_slab(struct kmem_cache *s,
 
 	if (likely(slab)) {
 		list_del(&slab->slab_list);
+		WRITE_ONCE(s->nr_freed_pages,
+			s->nr_freed_pages - (1UL << slab_order(slab)));
+
 		spin_unlock_irqrestore(&s->freed_slabs_lock, flags);
 		return slab;
 	}
@@ -2157,6 +2160,8 @@ static struct slab *alloc_slab_page(struct kmem_cache *s,
 		/* Rollback: put the struct slab back. */
 		spin_lock_irqsave(&s->freed_slabs_lock, flags);
 		list_add(&slab->slab_list, freed_slabs);
+		WRITE_ONCE(s->nr_freed_pages,
+			s->nr_freed_pages + (1UL << slab_order(slab)));
 		spin_unlock_irqrestore(&s->freed_slabs_lock, flags);
 
 		return NULL;
@@ -2437,6 +2442,8 @@ static void slub_tlbflush_worker(struct kthread_work *work)
 			WARN_ON(oo_order(slab->oo) != oo_order(s->min));
 			list_add(&slab->slab_list, &s->freed_slabs_min);
 		}
+		WRITE_ONCE(s->nr_freed_pages, s->nr_freed_pages +
+			(1UL << slab_order(slab)));
 		spin_unlock(&s->freed_slabs_lock);
 	}
 	spin_unlock_irqrestore(&slub_kworker_lock, irq_flags);
@@ -4923,6 +4930,7 @@ static int kmem_cache_open(struct kmem_cache *s, slab_flags_t flags)
 	spin_lock_init(&s->freed_slabs_lock);
 	INIT_LIST_HEAD(&s->freed_slabs);
 	INIT_LIST_HEAD(&s->freed_slabs_min);
+	s->nr_freed_pages = 0;
 #endif
 
 	s->flags = kmem_cache_flags(s->size, flags, s->name);
@@ -5419,6 +5427,7 @@ static struct kmem_cache * __init bootstrap(struct kmem_cache *static_cache)
 	INIT_LIST_HEAD(&s->freed_slabs_min);
 	list_splice(&static_cache->freed_slabs, &s->freed_slabs);
 	list_splice(&static_cache->freed_slabs_min, &s->freed_slabs_min);
+	s->nr_freed_pages = 0;
 #endif
 
 	/*
@@ -6087,6 +6096,14 @@ static ssize_t objects_partial_show(struct kmem_cache *s, char *buf)
 }
 SLAB_ATTR_RO(objects_partial);
 
+#ifdef CONFIG_SLAB_VIRTUAL
+static ssize_t deallocated_pages_show(struct kmem_cache *s, char *buf)
+{
+	return sysfs_emit(buf, "%lu\n", READ_ONCE(s->nr_freed_pages));
+}
+SLAB_ATTR_RO(deallocated_pages);
+#endif /* CONFIG_SLAB_VIRTUAL */
+
 static ssize_t slabs_cpu_partial_show(struct kmem_cache *s, char *buf)
 {
 	int objects = 0;
@@ -6413,6 +6430,9 @@ static struct attribute *slab_attrs[] = {
 	&min_partial_attr.attr,
 	&cpu_partial_attr.attr,
 	&objects_partial_attr.attr,
+#ifdef CONFIG_SLAB_VIRTUAL
+	&deallocated_pages_attr.attr,
+#endif
 	&partial_attr.attr,
 	&cpu_slabs_attr.attr,
 	&ctor_attr.attr,
