@@ -1031,13 +1031,13 @@ void kfree(const void *object)
 	if (unlikely(ZERO_OR_NULL_PTR(object)))
 		return;
 
-	folio = virt_to_folio(object);
 	if (unlikely(!is_slab_addr(object))) {
+		folio = virt_to_folio(object);
 		free_large_kmalloc(folio, (void *)object);
 		return;
 	}
 
-	slab = folio_slab(folio);
+	slab = virt_to_slab(object);
 	s = slab->slab_cache;
 	__kmem_cache_free(s, (void *)object, _RET_IP_);
 }
@@ -1058,12 +1058,13 @@ EXPORT_SYMBOL(kfree);
 size_t __ksize(const void *object)
 {
 	struct folio *folio;
+	struct kmem_cache *s;
 
 	if (unlikely(object == ZERO_SIZE_PTR))
 		return 0;
 
-	folio = virt_to_folio(object);
 	if (unlikely(!is_slab_addr(object))) {
+		folio = virt_to_folio(object);
 		if (WARN_ON(folio_size(folio) <= KMALLOC_MAX_CACHE_SIZE))
 			return 0;
 		if (WARN_ON(object != folio_address(folio)))
@@ -1071,7 +1072,9 @@ size_t __ksize(const void *object)
 		return folio_size(folio);
 	}
 
-	return slab_ksize(folio_slab(folio)->slab_cache);
+	s = virt_to_slab(object)->slab_cache;
+
+	return slab_ksize(s);
 }
 
 void *kmalloc_trace(struct kmem_cache *s, gfp_t gfpflags, size_t size)

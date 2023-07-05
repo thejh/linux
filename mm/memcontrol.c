@@ -2922,7 +2922,7 @@ struct mem_cgroup *mem_cgroup_from_obj_folio(struct folio *folio, void *p)
 		struct slab *slab;
 		unsigned int off;
 
-		slab = folio_slab(folio);
+		slab = virt_to_slab(p);
 		objcgs = slab_objcgs(slab);
 		if (!objcgs)
 			return NULL;
