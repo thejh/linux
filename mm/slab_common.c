@@ -989,12 +989,13 @@ void __init create_kmalloc_caches(void)
 size_t __ksize(const void *object)
 {
 	struct folio *folio;
+	struct kmem_cache *s;
 
 	if (unlikely(object == ZERO_SIZE_PTR))
 		return 0;
 
-	folio = virt_to_folio(object);
 	if (unlikely(!is_slab_addr(object))) {
+		folio = virt_to_folio(object);
 		if (WARN_ON(folio_size(folio) <= KMALLOC_MAX_CACHE_SIZE))
 			return 0;
 		if (WARN_ON(object != folio_address(folio)))
@@ -1002,11 +1003,13 @@ size_t __ksize(const void *object)
 		return folio_size(folio);
 	}
 
+	s = virt_to_slab(object)->slab_cache;
+
 #ifdef CONFIG_SLUB_DEBUG
-	skip_orig_size_check(folio_slab(folio)->slab_cache, object);
+	skip_orig_size_check(s, object);
 #endif
 
-	return slab_ksize(folio_slab(folio)->slab_cache);
+	return slab_ksize(s);
 }
 
 gfp_t kmalloc_fix_flags(gfp_t flags)
