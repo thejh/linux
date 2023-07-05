@@ -3848,25 +3848,23 @@ int build_detached_freelist(struct kmem_cache *s, size_t size,
 {
 	int lookahead = 3;
 	void *object;
-	struct folio *folio;
+	struct slab *slab;
 	size_t same;
 
 	object = p[--size];
-	folio = virt_to_folio(object);
+	slab = virt_to_slab(object);
 	if (!s) {
 		/* Handle kalloc'ed objects */
-		if (unlikely(!folio_test_slab(folio))) {
-			free_large_kmalloc(folio, object);
+		if (unlikely(slab == NULL)) {
+			free_large_kmalloc(virt_to_folio(object), object);
 			df->slab = NULL;
 			return size;
 		}
-		/* Derive kmem_cache from object */
-		df->slab = folio_slab(folio);
-		df->s = df->slab->slab_cache;
+		df->s = slab->slab_cache;
 	} else {
-		df->slab = folio_slab(folio);
 		df->s = cache_from_obj(s, object); /* Support for memcg */
 	}
+	df->slab = slab;
 
 	/* Start new detached freelist */
 	df->tail = object;
