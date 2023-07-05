@@ -1792,6 +1792,26 @@ static void *setup_object(struct kmem_cache *s, void *object)
 /*
  * Slab allocation and freeing
  */
+
+static inline void folio_set_slab(struct folio *folio, struct slab *slab)
+{
+	__folio_set_slab(folio);
+	/* Make the flag visible before any changes to folio->mapping */
+	smp_wmb();
+
+	if (page_is_pfmemalloc(folio_page(folio, 0)))
+		slab_set_pfmemalloc(slab);
+}
+
+static inline void folio_clear_slab(struct folio *folio, struct slab *slab)
+{
+	__slab_clear_pfmemalloc(slab);
+	folio->mapping = NULL;
+	/* Make the mapping reset visible before clearing the flag */
+	smp_wmb();
+	__folio_clear_slab(folio);
+}
+
 static inline struct slab *alloc_slab_page(gfp_t flags, int node,
 		struct kmem_cache_order_objects oo)
 {
@@ -1808,9 +1828,7 @@ static inline struct slab *alloc_slab_page(gfp_t flags, int node,
 		return NULL;
 
 	slab = folio_slab(folio);
-	__folio_set_slab(folio);
-	if (page_is_pfmemalloc(folio_page(folio, 0)))
-		slab_set_pfmemalloc(slab);
+	folio_set_slab(folio, slab);
 
 	return slab;
 }
@@ -2016,9 +2034,7 @@ static void __free_slab(struct kmem_cache *s, struct slab *slab)
 			check_object(s, slab, p, SLUB_RED_INACTIVE);
 	}
 
-	__slab_clear_pfmemalloc(slab);
-	__folio_clear_slab(folio);
-	folio->mapping = NULL;
+	folio_clear_slab(folio, slab);
 	if (current->reclaim_state)
 		current->reclaim_state->reclaimed_slab += pages;
 	unaccount_slab(slab, order, s);
