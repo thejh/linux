@@ -64,6 +64,9 @@ enum address_markers_idx {
 	KASAN_SHADOW_END_NR,
 #endif
 	CPU_ENTRY_AREA_NR,
+#ifdef CONFIG_SLAB_VIRTUAL
+	SLAB_AREA_NR,
+#endif
 #ifdef CONFIG_X86_ESPFIX64
 	ESPFIX_START_NR,
 #endif
@@ -95,6 +98,9 @@ static struct addr_marker address_markers[] = {
 	[LDT_NR]		= { 0UL,		"LDT remap" },
 #endif
 	[CPU_ENTRY_AREA_NR]	= { CPU_ENTRY_AREA_BASE,"CPU entry Area" },
+#ifdef CONFIG_SLAB_VIRTUAL
+	[SLAB_AREA_NR]		= { SLAB_BASE_ADDR,	"Slab Area" },
+#endif
 #ifdef CONFIG_X86_ESPFIX64
 	[ESPFIX_START_NR]	= { ESPFIX_BASE_ADDR,	"ESPfix Area", 16 },
 #endif
