@@ -2200,6 +2200,8 @@ static struct slab *alloc_slab_page(struct kmem_cache *s,
 		freed_slabs = &s->virtual.freed_slabs;
 
 	slab = get_free_slab(s, oo, meta_gfp_flags, freed_slabs);
+	if (!slab)
+		return NULL;
 
 	/*
 	 * Avoid making UAF reads easily exploitable by repopulating
