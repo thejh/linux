@@ -1923,7 +1923,7 @@ static void *setup_object(struct kmem_cache *s, void *object)
  * Slab allocation and freeing
  */
 
-static void folio_set_slab(struct folio *folio, struct slab *slab)
+static inline void folio_set_slab(struct folio *folio, struct slab *slab)
 {
 	__folio_set_slab(folio);
 	/* Make the flag visible before any changes to folio->mapping */
@@ -1937,7 +1937,7 @@ static void folio_set_slab(struct folio *folio, struct slab *slab)
 		slab_set_pfmemalloc(slab);
 }
 
-static void folio_clear_slab(struct folio *folio, struct slab *slab)
+static inline void folio_clear_slab(struct folio *folio, struct slab *slab)
 {
 	__slab_clear_pfmemalloc(slab);
 	folio->mapping = NULL;
