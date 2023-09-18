@@ -389,6 +389,9 @@ config SLAB_VIRTUAL
 	# ASAN support will require that shadow memory is allocated
 	# appropriately.
 	depends on !KASAN
+	# SLAB_VIRTUAL is supposed to prevent virtual address reuse between
+	# different caches, merging caches is incompatible with that goal.
+	depends on !SLAB_MERGE_DEFAULT
 	help
 	  Allocate slab objects from kernel-virtual memory, and ensure that
 	  virtual memory used as a slab cache is never reused to store
