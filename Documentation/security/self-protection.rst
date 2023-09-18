@@ -338,7 +338,9 @@ types to the same memory location) using one of the following techniques:
    allocator, then make the slab allocator give the page containing the object
    back to the page allocator, then either allocate the page directly as some
    other type of page or make the slab allocator allocate it again for a
-   different slab cache and allocate an object from there.
+   different slab cache and allocate an object from there. An example of such an
+   attack is described
+   `here <https://googleprojectzero.blogspot.com/2021/10/how-simple-linux-kernel-memory.html>`_
 
 In either case, the important part is that the same virtual address is reused
 for two objects of different types.
@@ -352,8 +354,7 @@ by cross-cache attacks: if the attacker can make the slab allocator return
 the page containing the victim object to the page allocator and then make
 it use the same page for a different slab cache, type confusion becomes
 possible again. Addressing the first case is therefore only worthwhile if
-cross-cache attacks are also addressed. AUTOSLAB uses a combination of
-probabilistic mitigations for this. SLAB_VIRTUAL addresses the second case
+cross-cache attacks are also addressed. SLAB_VIRTUAL addresses the second case
 deterministically by changing the way the slab allocator allocates memory.
 
 Preventing slab virtual address reuse
@@ -416,3 +417,19 @@ Performance
 SLAB_VIRTUAL's performance impact depends on the workload. On kernel compilation
 (kernbench) the slowdown is about 1-2% depending on the machine type and is
 slightly worse on machines with more cores.
+
+Limitations and areas for improvement
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* At the moment SLAB_VIRTUAL only supports x86_64. The majority of the code is
+  architecture-independent, so porting it to other 64-bit architectures should
+  be fairly straightforward. Porting it to 32-bit architectures would be much
+  more challenging because they have a much smaller virtual address space.
+
+* SLAB_VIRTUAL is currently incompatible with KFENCE, which uses its own memory
+  range for guarded allocations.
+
+* Virtual memory is permanently assigned to slab caches and cannot be reclaimed.
+  If the virtual memory is exhausted, the allocator cannot create any new slabs
+  and allocations may fail even though there is physical memory available to
+  service them.
