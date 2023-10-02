@@ -2001,7 +2001,7 @@ retry_locked:
 	 * relaxed based on the alignment requirements of the objects being
 	 * allocated, but for now, we behave like the page allocator would.
 	 */
-	data_range_start = ALIGN(old_base, alloc_size);
+	data_range_start = ALIGN(old_base + PAGE_SIZE, alloc_size);
 	data_range_end = data_range_start + alloc_size;
 
 	valid_start = data_range_start >= SLAB_DATA_BASE_ADDR &&
