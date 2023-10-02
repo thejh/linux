@@ -341,14 +341,15 @@ enum kmalloc_cache_type {
 #ifndef CONFIG_ZONE_DMA
 	KMALLOC_DMA = KMALLOC_NORMAL,
 #endif
-#ifndef CONFIG_MEMCG_KMEM
-	KMALLOC_CGROUP = KMALLOC_NORMAL,
-#endif
 	KMALLOC_RANDOM_START = KMALLOC_NORMAL,
 	KMALLOC_RANDOM_END = KMALLOC_RANDOM_START + RANDOM_KMALLOC_CACHES_NR,
-#ifdef CONFIG_MEMCG_KMEM
+#ifndef CONFIG_MEMCG_KMEM
+	KMALLOC_CGROUP = KMALLOC_NORMAL,
+#else
 	KMALLOC_CGROUP,
 #endif
+	KMALLOC_CGROUP_RANDOM_START = KMALLOC_CGROUP,
+	KMALLOC_CGROUP_RANDOM_END = KMALLOC_CGROUP_RANDOM_START + RANDOM_KMALLOC_CACHES_NR,
 	KMALLOC_RECLAIM,
 #ifdef CONFIG_ZONE_DMA
 	KMALLOC_DMA,
@@ -370,6 +371,12 @@ kmalloc_caches[NR_KMALLOC_TYPES][KMALLOC_SHIFT_HIGH + 1];
 
 extern unsigned long random_kmalloc_seed;
 
+static __always_inline enum kmalloc_cache_type kmalloc_random_cache(enum kmalloc_cache_type base, unsigned long caller)
+{
+	/* RANDOM_KMALLOC_CACHES_NR (=15) copies + the base */
+	return base + hash_64(caller ^ random_kmalloc_seed, ilog2(RANDOM_KMALLOC_CACHES_NR + 1));
+}
+
 static __always_inline enum kmalloc_cache_type kmalloc_type(gfp_t flags, unsigned long caller)
 {
 	/*
@@ -378,9 +385,7 @@ static __always_inline enum kmalloc_cache_type kmalloc_type(gfp_t flags, unsigne
 	 */
 	if (likely((flags & KMALLOC_NOT_NORMAL_BITS) == 0))
 #ifdef CONFIG_RANDOM_KMALLOC_CACHES
-		/* RANDOM_KMALLOC_CACHES_NR (=15) copies + the KMALLOC_NORMAL */
-		return KMALLOC_RANDOM_START + hash_64(caller ^ random_kmalloc_seed,
-						      ilog2(RANDOM_KMALLOC_CACHES_NR + 1));
+		return kmalloc_random_cache(KMALLOC_RANDOM_START, caller);
 #else
 		return KMALLOC_NORMAL;
 #endif
@@ -396,8 +401,12 @@ static __always_inline enum kmalloc_cache_type kmalloc_type(gfp_t flags, unsigne
 		return KMALLOC_DMA;
 	if (!IS_ENABLED(CONFIG_MEMCG_KMEM) || (flags & __GFP_RECLAIMABLE))
 		return KMALLOC_RECLAIM;
-	else
-		return KMALLOC_CGROUP;
+
+#ifdef CONFIG_RANDOM_KMALLOC_CACHES
+	return kmalloc_random_cache(KMALLOC_CGROUP_RANDOM_START, caller);
+#else
+	return KMALLOC_CGROUP;
+#endif
 }
 
 /*
