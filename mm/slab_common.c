@@ -768,32 +768,33 @@ EXPORT_SYMBOL(kmalloc_size_roundup);
 #define KMALLOC_DMA_NAME(sz)
 #endif
 
-#ifdef CONFIG_MEMCG_KMEM
-#define KMALLOC_CGROUP_NAME(sz)	.name[KMALLOC_CGROUP] = "kmalloc-cg-" #sz,
-#else
-#define KMALLOC_CGROUP_NAME(sz)
-#endif
-
 #ifdef CONFIG_RANDOM_KMALLOC_CACHES
 #define __KMALLOC_RANDOM_CONCAT(a, b) a ## b
-#define KMALLOC_RANDOM_NAME(N, sz) __KMALLOC_RANDOM_CONCAT(KMA_RAND_, N)(sz)
-#define KMA_RAND_1(sz)                  .name[KMALLOC_RANDOM_START +  1] = "kmalloc-rnd-01-" #sz,
-#define KMA_RAND_2(sz)  KMA_RAND_1(sz)  .name[KMALLOC_RANDOM_START +  2] = "kmalloc-rnd-02-" #sz,
-#define KMA_RAND_3(sz)  KMA_RAND_2(sz)  .name[KMALLOC_RANDOM_START +  3] = "kmalloc-rnd-03-" #sz,
-#define KMA_RAND_4(sz)  KMA_RAND_3(sz)  .name[KMALLOC_RANDOM_START +  4] = "kmalloc-rnd-04-" #sz,
-#define KMA_RAND_5(sz)  KMA_RAND_4(sz)  .name[KMALLOC_RANDOM_START +  5] = "kmalloc-rnd-05-" #sz,
-#define KMA_RAND_6(sz)  KMA_RAND_5(sz)  .name[KMALLOC_RANDOM_START +  6] = "kmalloc-rnd-06-" #sz,
-#define KMA_RAND_7(sz)  KMA_RAND_6(sz)  .name[KMALLOC_RANDOM_START +  7] = "kmalloc-rnd-07-" #sz,
-#define KMA_RAND_8(sz)  KMA_RAND_7(sz)  .name[KMALLOC_RANDOM_START +  8] = "kmalloc-rnd-08-" #sz,
-#define KMA_RAND_9(sz)  KMA_RAND_8(sz)  .name[KMALLOC_RANDOM_START +  9] = "kmalloc-rnd-09-" #sz,
-#define KMA_RAND_10(sz) KMA_RAND_9(sz)  .name[KMALLOC_RANDOM_START + 10] = "kmalloc-rnd-10-" #sz,
-#define KMA_RAND_11(sz) KMA_RAND_10(sz) .name[KMALLOC_RANDOM_START + 11] = "kmalloc-rnd-11-" #sz,
-#define KMA_RAND_12(sz) KMA_RAND_11(sz) .name[KMALLOC_RANDOM_START + 12] = "kmalloc-rnd-12-" #sz,
-#define KMA_RAND_13(sz) KMA_RAND_12(sz) .name[KMALLOC_RANDOM_START + 13] = "kmalloc-rnd-13-" #sz,
-#define KMA_RAND_14(sz) KMA_RAND_13(sz) .name[KMALLOC_RANDOM_START + 14] = "kmalloc-rnd-14-" #sz,
-#define KMA_RAND_15(sz) KMA_RAND_14(sz) .name[KMALLOC_RANDOM_START + 15] = "kmalloc-rnd-15-" #sz,
+#define KMALLOC_RANDOM_NAME(N, sz, base, type) __KMALLOC_RANDOM_CONCAT(KMA_RAND_, N)(sz, base, type)
+#define KMA_RAND_1(sz, base, type)                        .name[base +  1] = "kmalloc-rnd-01-" type #sz,
+#define KMA_RAND_2(sz, base, type)  KMA_RAND_1(sz, base, type)  .name[base +  2] = "kmalloc-rnd-02-" type #sz,
+#define KMA_RAND_3(sz, base, type)  KMA_RAND_2(sz, base, type)  .name[base +  3] = "kmalloc-rnd-03-" type #sz,
+#define KMA_RAND_4(sz, base, type)  KMA_RAND_3(sz, base, type)  .name[base +  4] = "kmalloc-rnd-04-" type #sz,
+#define KMA_RAND_5(sz, base, type)  KMA_RAND_4(sz, base, type)  .name[base +  5] = "kmalloc-rnd-05-" type #sz,
+#define KMA_RAND_6(sz, base, type)  KMA_RAND_5(sz, base, type)  .name[base +  6] = "kmalloc-rnd-06-" type #sz,
+#define KMA_RAND_7(sz, base, type)  KMA_RAND_6(sz, base, type)  .name[base +  7] = "kmalloc-rnd-07-" type #sz,
+#define KMA_RAND_8(sz, base, type)  KMA_RAND_7(sz, base, type)  .name[base +  8] = "kmalloc-rnd-08-" type #sz,
+#define KMA_RAND_9(sz, base, type)  KMA_RAND_8(sz, base, type)  .name[base +  9] = "kmalloc-rnd-09-" type #sz,
+#define KMA_RAND_10(sz, base, type) KMA_RAND_9(sz, base, type)  .name[base + 10] = "kmalloc-rnd-10-" type #sz,
+#define KMA_RAND_11(sz, base, type) KMA_RAND_10(sz, base, type) .name[base + 11] = "kmalloc-rnd-11-" type #sz,
+#define KMA_RAND_12(sz, base, type) KMA_RAND_11(sz, base, type) .name[base + 12] = "kmalloc-rnd-12-" type #sz,
+#define KMA_RAND_13(sz, base, type) KMA_RAND_12(sz, base, type) .name[base + 13] = "kmalloc-rnd-13-" type #sz,
+#define KMA_RAND_14(sz, base, type) KMA_RAND_13(sz, base, type) .name[base + 14] = "kmalloc-rnd-14-" type #sz,
+#define KMA_RAND_15(sz, base, type) KMA_RAND_14(sz, base, type) .name[base + 15] = "kmalloc-rnd-15-" type #sz,
 #else // CONFIG_RANDOM_KMALLOC_CACHES
-#define KMALLOC_RANDOM_NAME(N, sz)
+#define KMALLOC_RANDOM_NAME(N, sz, base, type)
+#endif
+
+#ifdef CONFIG_MEMCG_KMEM
+#define KMALLOC_CGROUP_NAME(sz)	.name[KMALLOC_CGROUP] = "kmalloc-cg-" #sz, \
+	KMALLOC_RANDOM_NAME(RANDOM_KMALLOC_CACHES_NR, sz, KMALLOC_CGROUP_RANDOM_START, "cg-")
+#else
+#define KMALLOC_CGROUP_NAME(sz)
 #endif
 
 #define INIT_KMALLOC_INFO(__size, __short_size)			\
@@ -802,7 +803,7 @@ EXPORT_SYMBOL(kmalloc_size_roundup);
 	.name[KMALLOC_RECLAIM] = "kmalloc-rcl-" #__short_size,	\
 	KMALLOC_CGROUP_NAME(__short_size)			\
 	KMALLOC_DMA_NAME(__short_size)				\
-	KMALLOC_RANDOM_NAME(RANDOM_KMALLOC_CACHES_NR, __short_size)	\
+	KMALLOC_RANDOM_NAME(RANDOM_KMALLOC_CACHES_NR, __short_size, KMALLOC_RANDOM_START, "")	\
 	.size = __size,						\
 }
 
