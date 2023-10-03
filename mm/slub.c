@@ -171,10 +171,26 @@
  */
 
 #ifdef CONFIG_SLAB_VIRTUAL
-unsigned long slub_addr_base = SLAB_DATA_BASE_ADDR;
+unsigned long _slub_addr_base = SLAB_DATA_BASE_ADDR;
+static __always_inline unsigned long slub_addr_base(void) { return _slub_addr_base; }
+static __always_inline void set_slub_addr_base(unsigned long val) { _slub_addr_base = val; }
+
 /* Protects slub_addr_base */
-static DEFINE_SPINLOCK(slub_valloc_lock);
-#endif /* CONFIG_SLAB_VIRTUAL */
+static DEFINE_SPINLOCK(slub_valloc_spinlock);
+#define slub_valloc_lock(flags) spin_lock_irqsave(&slub_valloc_spinlock, flags)
+#define slub_valloc_unlock(flags) spin_unlock_irqrestore(&slub_valloc_spinlock, flags)
+DEFINE_STATIC_KEY_FALSE(slab_virtual_key);
+
+#else
+#define slub_valloc_lock(flags) ((void)flags)
+#define slub_valloc_unlock(flags) ((void)flags)
+
+static __always_inline unsigned long slub_addr_base(void) { return 0; }
+static __always_inline void set_slub_addr_base(unsigned long val) {}
+
+#endif
+
+
 
 /*
  * We could simply use migrate_disable()/enable() but as long as it's a
@@ -399,12 +415,18 @@ static inline freeptr_t freelist_ptr_encode(const struct kmem_cache *s,
 static inline bool freelist_pointer_corrupted(struct slab *slab, freeptr_t ptr,
 	void *decoded)
 {
-#ifdef CONFIG_SLAB_VIRTUAL
+	struct virtual_slab *vs;
+
+	if (!slab_virtual_enabled())
+		return false;
+
+	vs = (struct virtual_slab *)slab;
+
 	/*
 	 * If the freepointer decodes to 0, use 0 as the slab_base so that
 	 * the check below always passes (0 & slab->align_mask == 0).
 	 */
-	unsigned long slab_base = decoded ? (unsigned long)slab_to_virt(slab)
+	unsigned long slab_base = decoded ? (unsigned long)slab_to_virt(vs)
 		: 0;
 
 	/*
@@ -422,12 +444,9 @@ static inline bool freelist_pointer_corrupted(struct slab *slab, freeptr_t ptr,
 	 * cost compared to the security improvement - probably not)?
 	 */
 	return CHECK_DATA_CORRUPTION(
-		((unsigned long)decoded & slab->align_mask) != slab_base,
+		((unsigned long)decoded & vs->align_mask) != slab_base,
 		"bad freeptr (encoded %lx, ptr %p, base %lx, mask %lx",
-		ptr.v, decoded, slab_base, slab->align_mask);
-#else
-	return false;
-#endif
+		ptr.v, decoded, slab_base, vs->align_mask);
 }
 
 static inline void *freelist_ptr_decode(freeptr_t ptr, unsigned long ptr_addr,
@@ -562,26 +581,26 @@ slub_set_cpu_partial(struct kmem_cache *s, unsigned int nr_objects)
  */
 static __always_inline void slab_lock(struct slab *slab)
 {
-#ifdef CONFIG_SLAB_VIRTUAL
-	spin_lock(&slab->slab_lock);
-#else
-	struct page *page = slab_page(slab);
+	if (slab_virtual_enabled()) {
+		spin_lock(&slab->slab_lock);
+	} else {
+		struct page *page = slab_page(slab);
 
-	VM_BUG_ON_PAGE(PageTail(page), page);
-	bit_spin_lock(PG_locked, &page->flags);
-#endif
+		VM_BUG_ON_PAGE(PageTail(page), page);
+		bit_spin_lock(PG_locked, &page->flags);
+	}
 }
 
 static __always_inline void slab_unlock(struct slab *slab)
 {
-#ifdef CONFIG_SLAB_VIRTUAL
-	spin_unlock(&slab->slab_lock);
-#else
-	struct page *page = slab_page(slab);
+	if (slab_virtual_enabled()) {
+		spin_unlock(&slab->slab_lock);
+	} else {
+		struct page *page = slab_page(slab);
 
-	VM_BUG_ON_PAGE(PageTail(page), page);
-	__bit_spin_unlock(PG_locked, &page->flags);
-#endif
+		VM_BUG_ON_PAGE(PageTail(page), page);
+		__bit_spin_unlock(PG_locked, &page->flags);
+	}
 }
 
 static inline bool
@@ -1705,6 +1724,26 @@ out:
 
 __setup("slub_debug", setup_slub_debug);
 
+#ifdef CONFIG_SLAB_VIRTUAL
+static int __init setup_slab_virtual(char *str)
+{
+	int enabled;
+
+	get_option(&str, &enabled);
+
+	if (enabled) {
+		pr_info("slab_virtual enabled\n");
+		static_branch_enable(&slab_virtual_key);
+	} else {
+		pr_info("slab_virtual disabled\n");
+		static_branch_disable(&slab_virtual_key);
+	}
+
+	return 1;
+}
+__setup("slab_virtual=", setup_slab_virtual);
+#endif /* CONFIG_SLAB_VIRTUAL */
+
 /*
  * kmem_cache_flags - apply debugging options to the cache
  * @object_size:	the size of an object without meta data
@@ -1927,9 +1966,8 @@ static inline void folio_set_slab(struct folio *folio, struct slab *slab)
 	/* Make the flag visible before any changes to folio->mapping */
 	smp_wmb();
 
-#ifdef CONFIG_SLAB_VIRTUAL
-	slab->backing_folio = folio;
-#endif
+	if (slab_virtual_enabled())
+		slab->backing_folio = folio;
 
 	if (folio_is_pfmemalloc(folio))
 		slab_set_pfmemalloc(slab);
@@ -1942,12 +1980,11 @@ static inline void folio_clear_slab(struct folio *folio, struct slab *slab)
 	/* Make the mapping reset visible before clearing the flag */
 	smp_wmb();
 	__folio_clear_slab(folio);
-#ifdef CONFIG_SLAB_VIRTUAL
-	slab->backing_folio = NULL;
-#endif
+
+	if (slab_virtual_enabled())
+		slab->backing_folio = NULL;
 }
 
-#ifdef CONFIG_SLAB_VIRTUAL
 /*
  * Make sure we have the necessary page tables for the given address.
  * Returns a pointer to the PTE, or NULL on allocation failure.
@@ -1968,7 +2005,7 @@ static pte_t *slub_get_ptep(unsigned long address, gfp_t gfp_flags,
 	struct page *spare_page = NULL;
 
 retry:
-	spin_lock_irqsave(&slub_valloc_lock, flags);
+	slub_valloc_lock(flags);
 	/*
 	 * The top-level entry should already be present - see
 	 * preallocate_top_level_entries().
@@ -1997,13 +2034,13 @@ retry:
 			(pte_t *)page_to_virt(spare_page));
 		spare_page = NULL;
 	}
-	spin_unlock_irqrestore(&slub_valloc_lock, flags);
+	slub_valloc_unlock(flags);
 	if (spare_page)
 		__free_page(spare_page);
 	return pte_offset_kernel(pmd, address);
 
 need_page:
-	spin_unlock_irqrestore(&slub_valloc_lock, flags);
+	slub_valloc_unlock(flags);
 	VM_WARN_ON(!may_alloc);
 	spare_page = alloc_page(gfp_flags);
 	if (unlikely(!spare_page))
@@ -2018,7 +2055,7 @@ need_page:
  * it, and allocate a corresponding struct slab.
  * This is cold code, we don't really have to worry about performance here.
  */
-static struct slab *alloc_slab_meta(unsigned int order, gfp_t gfp_flags)
+static struct virtual_slab *alloc_slab_meta(unsigned int order, gfp_t gfp_flags)
 {
 	unsigned long alloc_size = PAGE_SIZE << order;
 	unsigned long flags;
@@ -2026,7 +2063,7 @@ static struct slab *alloc_slab_meta(unsigned int order, gfp_t gfp_flags)
 	unsigned long data_range_start, data_range_end;
 	unsigned long meta_range_start, meta_range_end;
 	unsigned long addr;
-	struct slab *slab, *sp;
+	struct virtual_slab *slab, *sp;
 	bool valid_start, valid_end;
 
 	gfp_flags &= (__GFP_HIGH | __GFP_RECLAIM | __GFP_IO |
@@ -2036,16 +2073,16 @@ static struct slab *alloc_slab_meta(unsigned int order, gfp_t gfp_flags)
 	/* New page tables and metadata pages should be zeroed */
 	gfp_flags |= __GFP_ZERO;
 
-	spin_lock_irqsave(&slub_valloc_lock, flags);
+	slub_valloc_lock(flags);
 retry_locked:
-	old_base = slub_addr_base;
+	old_base = slub_addr_base();
 
 	/*
 	 * We drop the lock. The following code might sleep during
 	 * page table allocation. Any mutations we make before rechecking
 	 * slub_addr_base are idempotent, so that's fine.
 	 */
-	spin_unlock_irqrestore(&slub_valloc_lock, flags);
+	slub_valloc_unlock(flags);
 
 	/*
 	 * [data_range_start, data_range_end) is the virtual address range where
@@ -2078,8 +2115,8 @@ retry_locked:
 	 * located at meta_range_start is the head slab that contains the actual
 	 * data, all other struct slabs in the range point to the head slab.
 	 */
-	meta_range_start = virt_to_slab_raw(data_range_start);
-	meta_range_end = virt_to_slab_raw(data_range_end);
+	meta_range_start = virt_to_slab_virtual_raw(data_range_start);
+	meta_range_end = virt_to_slab_virtual_raw(data_range_end);
 
 	/* Ensure the meta range is mapped. */
 	for (addr = ALIGN_DOWN(meta_range_start, PAGE_SIZE);
@@ -2089,15 +2126,15 @@ retry_locked:
 		if (ptep == NULL)
 			return NULL;
 
-		spin_lock_irqsave(&slub_valloc_lock, flags);
+		slub_valloc_lock(flags);
 		if (pte_none(READ_ONCE(*ptep))) {
 			struct page *meta_page;
 
-			spin_unlock_irqrestore(&slub_valloc_lock, flags);
+			slub_valloc_unlock(flags);
 			meta_page = alloc_page(gfp_flags);
 			if (meta_page == NULL)
 				return NULL;
-			spin_lock_irqsave(&slub_valloc_lock, flags);
+			slub_valloc_lock(flags);
 
 			/* Make sure that no one else has already mapped that page */
 			if (pte_none(READ_ONCE(*ptep)))
@@ -2106,7 +2143,7 @@ retry_locked:
 			else
 				__free_page(meta_page);
 		}
-		spin_unlock_irqrestore(&slub_valloc_lock, flags);
+		slub_valloc_unlock(flags);
 	}
 
 	/* Ensure we have page tables for the data range. */
@@ -2119,16 +2156,16 @@ retry_locked:
 	}
 
 	/* Did we race with someone else who made forward progress? */
-	spin_lock_irqsave(&slub_valloc_lock, flags);
-	if (old_base != slub_addr_base)
+	slub_valloc_lock(flags);
+	if (old_base != slub_addr_base())
 		goto retry_locked;
 
 	/* Success! Grab the range for ourselves. */
-	slub_addr_base = data_range_end;
-	spin_unlock_irqrestore(&slub_valloc_lock, flags);
+	set_slub_addr_base(data_range_end);
+	slub_valloc_unlock(flags);
 
-	slab = (struct slab *)meta_range_start;
-	spin_lock_init(&slab->slab_lock);
+	slab = (struct virtual_slab *)meta_range_start;
+	spin_lock_init(&slab->slab.slab_lock);
 
 	/* Initialize basic slub metadata for virt_to_slab() */
 	for (sp = slab; (unsigned long)sp < meta_range_end; sp++)
@@ -2138,20 +2175,20 @@ retry_locked:
 }
 
 /* Get an unused slab, or allocate a new one */
-static struct slab *get_free_slab(struct kmem_cache *s,
+static struct virtual_slab *get_free_slab(struct kmem_cache *s,
 	struct kmem_cache_order_objects oo, gfp_t meta_gfp_flags,
 	struct list_head *freed_slabs)
 {
 	unsigned long flags;
-	struct slab *slab;
+	struct virtual_slab *slab;
 
 	spin_lock_irqsave(&s->virtual.freed_slabs_lock, flags);
-	slab = list_first_entry_or_null(freed_slabs, struct slab, slab_list);
+	slab = list_first_entry_or_null(freed_slabs, struct virtual_slab, slab.slab_list);
 
 	if (likely(slab)) {
-		list_del(&slab->slab_list);
+		list_del(&slab->slab.slab_list);
 		WRITE_ONCE(s->virtual.nr_freed_pages,
-			s->virtual.nr_freed_pages - (1UL << slab_order(slab)));
+			s->virtual.nr_freed_pages - (1UL << slab_order(&slab->slab)));
 
 		spin_unlock_irqrestore(&s->virtual.freed_slabs_lock, flags);
 		return slab;
@@ -2180,12 +2217,12 @@ static struct slab *get_free_slab(struct kmem_cache *s,
 	return slab;
 }
 
-static struct slab *alloc_slab_page(struct kmem_cache *s,
+static struct slab *alloc_slab_page_virtual(struct kmem_cache *s,
 		gfp_t meta_gfp_flags, gfp_t gfp_flags, int node,
 		struct kmem_cache_order_objects oo)
 {
 	struct folio *folio;
-	struct slab *slab;
+	struct virtual_slab *slab;
 	unsigned int order = oo_order(oo);
 	unsigned long flags;
 	void *virt_mapping;
@@ -2216,16 +2253,16 @@ static struct slab *alloc_slab_page(struct kmem_cache *s,
 	if (!folio) {
 		/* Rollback: put the struct slab back. */
 		spin_lock_irqsave(&s->virtual.freed_slabs_lock, flags);
-		list_add(&slab->slab_list, freed_slabs);
+		list_add(&slab->slab.slab_list, freed_slabs);
 		WRITE_ONCE(s->virtual.nr_freed_pages,
-			s->virtual.nr_freed_pages + (1UL << slab_order(slab)));
+			s->virtual.nr_freed_pages + (1UL << slab_order(&slab->slab)));
 		spin_unlock_irqrestore(&s->virtual.freed_slabs_lock, flags);
 
 		return NULL;
 	}
-	folio_set_slab(folio, slab);
+	folio_set_slab(folio, (struct slab *)slab);
 
-	slab->oo = oo;
+	slab->slab.oo = oo;
 
 	virt_mapping = slab_to_virt(slab);
 
@@ -2239,16 +2276,21 @@ static struct slab *alloc_slab_page(struct kmem_cache *s,
 		set_pte_safe(ptep, mk_pte(folio_page(folio, i), PAGE_KERNEL));
 	}
 
-	return slab;
+	return (struct slab *)slab;
 }
-#else
+
 static inline struct slab *alloc_slab_page(struct kmem_cache *s,
 		gfp_t meta_flags, gfp_t flags, int node,
 		struct kmem_cache_order_objects oo)
 {
 	struct folio *folio;
 	struct slab *slab;
-	unsigned int order = oo_order(oo);
+	unsigned int order;
+
+	if (slab_virtual_enabled())
+		return alloc_slab_page_virtual(s, meta_flags, flags, node, oo);
+
+	order = oo_order(oo);
 
 	if (node == NUMA_NO_NODE)
 		folio = (struct folio *)alloc_pages(flags, order);
@@ -2263,7 +2305,6 @@ static inline struct slab *alloc_slab_page(struct kmem_cache *s,
 
 	return slab;
 }
-#endif /* CONFIG_SLAB_VIRTUAL */
 
 #ifdef CONFIG_SLAB_FREELIST_RANDOM
 /* Pre-initialize the random sequence cache */
@@ -2461,16 +2502,16 @@ static void slub_tlbflush_worker(struct kthread_work *work)
 {
 	unsigned long irq_flags;
 	LIST_HEAD(local_queue);
-	struct slab *slab, *tmp;
+	struct virtual_slab *slab, *tmp;
 	unsigned long addr_start = ULONG_MAX;
 	unsigned long addr_end = 0;
 
 	spin_lock_irqsave(&slub_kworker_lock, irq_flags);
 	list_splice_init(&slub_tlbflush_queue, &local_queue);
-	list_for_each_entry(slab, &local_queue, flush_list_elem) {
+	list_for_each_entry(slab, &local_queue, slab.slab_list) {
 		unsigned long start = (unsigned long)slab_to_virt(slab);
 		unsigned long end = start + PAGE_SIZE *
-			(1UL << oo_order(slab->oo));
+			(1UL << oo_order(slab->slab.oo));
 
 		if (start < addr_start)
 			addr_start = start;
@@ -2483,36 +2524,49 @@ static void slub_tlbflush_worker(struct kthread_work *work)
 		flush_tlb_kernel_range(addr_start, addr_end);
 
 	spin_lock_irqsave(&slub_kworker_lock, irq_flags);
-	list_for_each_entry_safe(slab, tmp, &local_queue, flush_list_elem) {
-		struct folio *folio = slab_folio(slab);
-		struct kmem_cache *s = slab->slab_cache;
+	list_for_each_entry_safe(slab, tmp, &local_queue, slab.slab_list) {
+		struct folio *folio = slab->slab.backing_folio;
+		struct kmem_cache *s = slab->slab.slab_cache;
 
-		list_del(&slab->flush_list_elem);
-		folio_clear_slab(folio, slab);
-		__free_pages(folio_page(folio, 0), oo_order(slab->oo));
+		list_del(&slab->slab.slab_list);
+		folio_clear_slab(folio, &slab->slab);
+		__free_pages(folio_page(folio, 0), oo_order(slab->slab.oo));
 
 		/* IRQs are already off */
 		spin_lock(&s->virtual.freed_slabs_lock);
-		if (oo_order(slab->oo) == oo_order(s->oo)) {
-			list_add(&slab->slab_list, &s->virtual.freed_slabs);
+		if (oo_order(slab->slab.oo) == oo_order(s->oo)) {
+			list_add(&slab->slab.slab_list, &s->virtual.freed_slabs);
 		} else {
-			WARN_ON(oo_order(slab->oo) != oo_order(s->min));
-			list_add(&slab->slab_list, &s->virtual.freed_slabs_min);
+			WARN_ON(oo_order(slab->slab.oo) != oo_order(s->min));
+			list_add(&slab->slab.slab_list, &s->virtual.freed_slabs_min);
 		}
 		WRITE_ONCE(s->virtual.nr_freed_pages, s->virtual.nr_freed_pages +
-			(1UL << slab_order(slab)));
+			(1UL << slab_order(&slab->slab)));
 		spin_unlock(&s->virtual.freed_slabs_lock);
 	}
 	spin_unlock_irqrestore(&slub_kworker_lock, irq_flags);
 }
 static DEFINE_KTHREAD_WORK(slub_tlbflush_work, slub_tlbflush_worker);
 
-static void __free_slab(struct kmem_cache *s, struct slab *slab)
+static inline void queue_slab_tlb_flush(struct virtual_slab *slab)
 {
-	int order = oo_order(slab->oo);
-	unsigned long pages = 1UL << order;
-	unsigned long slab_base = (unsigned long)slab_address(slab);
 	unsigned long irq_flags;
+
+	spin_lock_irqsave(&slub_kworker_lock, irq_flags);
+	list_add(&slab->slab.slab_list, &slub_tlbflush_queue);
+	spin_unlock_irqrestore(&slub_kworker_lock, irq_flags);
+	if (READ_ONCE(slub_kworker) != NULL)
+		kthread_queue_work(slub_kworker, &slub_tlbflush_work);
+}
+#else
+static inline void queue_slab_tlb_flush(struct virtual_slab *slab) {}
+#endif
+
+static void __free_slab_virtual(struct kmem_cache *s, struct virtual_slab *slab)
+{
+	int order = oo_order(slab->slab.oo);
+	unsigned long pages = 1UL << order;
+	unsigned long slab_base = (unsigned long)slab_address(&slab->slab);
 
 	/* Clear the PTEs for the slab we're freeing */
 	for (unsigned long i = 0; i < pages; i++) {
@@ -2527,7 +2581,7 @@ static void __free_slab(struct kmem_cache *s, struct slab *slab)
 	}
 
 	mm_account_reclaimed_pages(pages);
-	unaccount_slab(slab, order, s);
+	unaccount_slab(&slab->slab, order, s);
 
 	/*
 	 * We might not be able to a TLB flush here (e.g. hardware interrupt
@@ -2535,25 +2589,29 @@ static void __free_slab(struct kmem_cache *s, struct slab *slab)
 	 * which will flush the TLB for us and only then free the physical
 	 * memory.
 	 */
-	spin_lock_irqsave(&slub_kworker_lock, irq_flags);
-	list_add(&slab->flush_list_elem, &slub_tlbflush_queue);
-	spin_unlock_irqrestore(&slub_kworker_lock, irq_flags);
-	if (READ_ONCE(slub_kworker) != NULL)
-		kthread_queue_work(slub_kworker, &slub_tlbflush_work);
+	queue_slab_tlb_flush(slab);
 }
-#else
+
 static void __free_slab(struct kmem_cache *s, struct slab *slab)
 {
-	struct folio *folio = slab_folio(slab);
-	int order = folio_order(folio);
-	int pages = 1 << order;
+	struct folio *folio;
+	int order;
+	int pages;
+
+	if (slab_virtual_enabled()) {
+		__free_slab_virtual(s, (struct virtual_slab *)slab);
+		return;
+	}
+
+	folio = slab_folio(slab);
+	order = folio_order(folio);
+	pages = 1 << order;
 
 	folio_clear_slab(folio, slab);
 	mm_account_reclaimed_pages(pages);
 	unaccount_slab(slab, order, s);
 	__free_pages(&folio->page, order);
 }
-#endif /* CONFIG_SLAB_VIRTUAL */
 
 static void rcu_free_slab(struct rcu_head *h)
 {
@@ -4975,13 +5033,14 @@ static int calculate_sizes(struct kmem_cache *s)
 
 static inline void slab_virtual_open(struct kmem_cache *s)
 {
-#ifdef CONFIG_SLAB_VIRTUAL
+	if (!slab_virtual_enabled())
+		return;
+
 	/* WARNING: this stuff will be relocated in bootstrap()! */
 	spin_lock_init(&s->virtual.freed_slabs_lock);
 	INIT_LIST_HEAD(&s->virtual.freed_slabs);
 	INIT_LIST_HEAD(&s->virtual.freed_slabs_min);
 	s->virtual.nr_freed_pages = 0;
-#endif
 }
 
 static int kmem_cache_open(struct kmem_cache *s, slab_flags_t flags)
@@ -5478,12 +5537,13 @@ static int slab_memory_callback(struct notifier_block *self,
 
 static inline void slab_virtual_bootstrap(struct kmem_cache *s, struct kmem_cache *static_cache)
 {
+	if (!slab_virtual_enabled())
+		return;
+
 	slab_virtual_open(s);
 
-#ifdef CONFIG_SLAB_VIRTUAL
 	list_splice(&static_cache->virtual.freed_slabs, &s->virtual.freed_slabs);
 	list_splice(&static_cache->virtual.freed_slabs_min, &s->virtual.freed_slabs_min);
-#endif
 }
 
 static struct kmem_cache * __init bootstrap(struct kmem_cache *static_cache)
@@ -5526,6 +5586,9 @@ void __init init_slub_page_reclaim(void)
 {
 	struct kthread_worker *w;
 
+	if (!slab_virtual_enabled())
+		return;
+
 	w = kthread_create_worker(0, "slub-physmem-reclaim");
 	if (IS_ERR(w))
 		panic("unable to create slub-physmem-reclaim worker");
@@ -5538,7 +5601,7 @@ void __init init_slub_page_reclaim(void)
 	 */
 	smp_store_release(&slub_kworker, w);
 }
-#endif /* CONFIG_SLAB_VIRTUAL */
+#endif
 
 void __init kmem_cache_init(void)
 {
