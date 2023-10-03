@@ -1274,6 +1274,14 @@ static inline struct folio *virt_to_folio(const void *x)
 	return page_folio(page);
 }
 
+static inline bool is_slab_addr(const void *ptr)
+{
+	if (slab_virtual_enabled())
+		return is_slab_virtual_addr(ptr);
+
+	return folio_test_slab(virt_to_folio(ptr));
+}
+
 void __folio_put(struct folio *folio);
 
 void put_pages_list(struct list_head *pages);
