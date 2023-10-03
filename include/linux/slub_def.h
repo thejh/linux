@@ -87,7 +87,6 @@ struct kmem_cache_cpu {
  * Slab cache management.
  */
 struct kmem_cache_virtual {
-#ifdef CONFIG_SLAB_VIRTUAL
 	/* Protects freed_slabs, freed_slabs_min, and nr_free_pages */
 	spinlock_t freed_slabs_lock;
 	/*
@@ -99,7 +98,6 @@ struct kmem_cache_virtual {
 	struct list_head freed_slabs_min;
 	/* Number of slab pages which got freed */
 	unsigned long nr_freed_pages;
-#endif
 };
 
 struct kmem_cache {

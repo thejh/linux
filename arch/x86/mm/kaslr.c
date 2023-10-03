@@ -139,11 +139,11 @@ void __init kernel_randomize_memory(void)
 
 #ifdef CONFIG_SLAB_VIRTUAL
 	/*
-	 * slub_addr_base is initialized separately from the
+	 * _slub_addr_base is initialized separately from the
 	 * kaslr_memory_regions because it comes after CPU_ENTRY_AREA_BASE.
 	 */
 	prandom_bytes_state(&rand_state, &rand, sizeof(rand));
-	slub_addr_base += (rand & ((1UL << 36) - PAGE_SIZE));
+	_slub_addr_base += (rand & ((1UL << 36) - PAGE_SIZE));
 #endif
 }
 

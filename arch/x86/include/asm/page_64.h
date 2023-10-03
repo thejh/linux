@@ -4,6 +4,7 @@
 
 #include <asm/page_64_types.h>
 #include <asm/pgtable_types.h>
+#include <linux/jump_label.h>
 
 #ifndef __ASSEMBLY__
 #include <asm/cpufeatures.h>
@@ -20,17 +21,20 @@ extern unsigned long vmalloc_base;
 extern unsigned long vmemmap_base;
 
 #ifdef CONFIG_SLAB_VIRTUAL
+DECLARE_STATIC_KEY_FALSE(slab_virtual_key);
 unsigned long slab_virt_to_phys(unsigned long x);
+#define slab_virtual_enabled() static_branch_unlikely(&slab_virtual_key)
+#else
+#define slab_virtual_enabled() false
+static inline unsigned long slab_virt_to_phys(unsigned long x) { return 0; }
 #endif
 
 static __always_inline unsigned long __phys_addr_nodebug(unsigned long x)
 {
 	unsigned long y = x - __START_KERNEL_map;
 
-#ifdef CONFIG_SLAB_VIRTUAL
-	if (is_slab_addr(x))
+	if (slab_virtual_enabled() && is_slab_virtual_addr(x))
 		return slab_virt_to_phys(x);
-#endif
 
 	/* use the carry flag to determine if x was < __START_KERNEL_map */
 	x = y + ((x > y) ? phys_base : (__START_KERNEL_map - PAGE_OFFSET));

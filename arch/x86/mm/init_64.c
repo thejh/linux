@@ -1334,9 +1334,8 @@ failed:
 static void __init preallocate_top_level_entries(void)
 {
 	preallocate_top_level_entries_range(VMALLOC_START, VMEMORY_END);
-#ifdef CONFIG_SLAB_VIRTUAL
-	preallocate_top_level_entries_range(SLAB_BASE_ADDR, SLAB_END_ADDR - 1);
-#endif
+	if (IS_ENABLED(CONFIG_SLAB_VIRTUAL))
+		preallocate_top_level_entries_range(SLAB_BASE_ADDR, SLAB_END_ADDR - 1);
 }
 
 void __init mem_init(void)
