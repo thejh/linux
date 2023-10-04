@@ -7070,11 +7070,109 @@ void debugfs_slab_release(struct kmem_cache *s)
 	debugfs_lookup_and_remove(s->name, slab_debugfs_root);
 }
 
+#ifdef CONFIG_SLAB_VIRTUAL
+static unsigned long vaddr_ranges_first_valid_slab(unsigned long pos)
+{
+	unsigned long end_addr;
+	unsigned long flags;
+	struct virtual_slab *slab;
+
+	slub_valloc_lock(flags);
+	end_addr = slub_addr_base();
+	slub_valloc_unlock(flags);
+
+	if (pos == 0)
+		pos = SLAB_DATA_BASE_ADDR;
+
+	for (; pos < end_addr; pos += PAGE_SIZE) {
+		slab = (struct virtual_slab *)virt_to_slab_virtual_raw(pos);
+		/* TODO hacky racy code */
+		if (READ_ONCE(slab->compound_slab_head) != slab)
+			continue;
+
+		if (READ_ONCE(slab->slab.slab_cache) == NULL)
+			continue;
+
+		return pos;
+	}
+	return 0;
+}
+
+static void *vaddr_ranges_debug_start(struct seq_file *seq, loff_t *ppos)
+{
+	unsigned long pos = *ppos;
+	unsigned long ret;
+
+	if (pos == 0)
+		pos = SLAB_DATA_BASE_ADDR;
+
+	ret = vaddr_ranges_first_valid_slab(pos);
+	*ppos = ret;
+
+	return (void *)ret;
+}
+
+static void *vaddr_ranges_debug_next(struct seq_file *seq, void *pos_ptr, loff_t *ppos)
+{
+	unsigned long pos = *ppos;
+	struct virtual_slab *last_slab = (struct virtual_slab *)virt_to_slab((void *)pos);
+
+	WARN_ON((unsigned long)pos_ptr != *ppos);
+
+	pos += PAGE_SIZE << oo_order(last_slab->slab.oo);
+	pos = vaddr_ranges_first_valid_slab(pos);
+
+	if (pos == 0) {
+		*ppos = ~(loff_t)0;
+		return NULL;
+	}
+	*ppos = pos;
+
+	return (void *)pos;
+}
+
+static int vaddr_ranges_debug_show(struct seq_file *seq, void *start_addr)
+{
+	struct slab *slab = virt_to_slab(start_addr);
+	void *end_addr = start_addr + (PAGE_SIZE << oo_order(slab->oo));
+	struct kmem_cache *cache = slab->slab_cache;
+
+	seq_printf(seq, "%pK,%pK,%s\n", start_addr, end_addr, cache->name);
+	return 0;
+}
+
+static void vaddr_ranges_debug_stop(struct seq_file *seq, void *start_addr) {}
+
+static const struct seq_operations vaddr_ranges_debug_seq_ops = {
+	.start = vaddr_ranges_debug_start,
+	.next = vaddr_ranges_debug_next,
+	.stop = vaddr_ranges_debug_stop,
+	.show = vaddr_ranges_debug_show
+};
+
+static int vaddr_ranges_debug_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &vaddr_ranges_debug_seq_ops);
+}
+
+static const struct file_operations vaddr_ranges_debug_fops = {
+	.open = vaddr_ranges_debug_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = seq_release
+};
+#endif /* CONFIG_SLAB_VIRTUAL */
+
 static int __init slab_debugfs_init(void)
 {
 	struct kmem_cache *s;
 
 	slab_debugfs_root = debugfs_create_dir("slab", NULL);
+
+#ifdef CONFIG_SLAB_VIRTUAL
+	if (slab_virtual_enabled())
+		debugfs_create_file("vaddr-ranges", 0400, slab_debugfs_root, NULL, &vaddr_ranges_debug_fops);
+#endif /* CONFIG_SLAB_VIRTUAL */
 
 	list_for_each_entry(s, &slab_caches, list)
 		if (s->flags & SLAB_STORE_USER)
