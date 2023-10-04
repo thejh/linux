@@ -2095,9 +2095,9 @@ retry_locked:
 	data_range_start = ALIGN(old_base, alloc_size);
 	data_range_end = data_range_start + alloc_size;
 
-	valid_start = data_range_start >= SLAB_BASE_ADDR &&
+	valid_start = data_range_start >= SLAB_DATA_BASE_ADDR &&
 		IS_ALIGNED(data_range_start, PAGE_SIZE);
-	valid_end = data_range_end >= SLAB_BASE_ADDR &&
+	valid_end = data_range_end >= SLAB_DATA_BASE_ADDR &&
 		IS_ALIGNED(data_range_end, PAGE_SIZE);
 	if (CHECK_DATA_CORRUPTION(!valid_start,
 			"invalid slab data range start") ||

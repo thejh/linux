@@ -278,7 +278,7 @@ static unsigned long virt_to_slab_virtual_raw(unsigned long addr)
 {
 	VM_WARN_ON(!is_slab_virtual_addr(addr));
 	return SLAB_BASE_ADDR +
-		((addr - SLAB_BASE_ADDR) / PAGE_SIZE * sizeof(struct virtual_slab));
+		((addr - SLAB_DATA_BASE_ADDR) / PAGE_SIZE * sizeof(struct virtual_slab));
 }
 
 static struct virtual_slab *virt_to_slab_virtual(const void *addr)
@@ -311,7 +311,7 @@ static void *slab_to_virt(const struct virtual_slab *s)
 		return NULL;
 
 	slab_idx = ((unsigned long)s - SLAB_BASE_ADDR) / sizeof(*s);
-	return (void *)(SLAB_BASE_ADDR + PAGE_SIZE * slab_idx);
+	return (void *)(SLAB_DATA_BASE_ADDR + PAGE_SIZE * slab_idx);
 }
 
 static inline struct slab *virt_to_slab(const void *addr)
