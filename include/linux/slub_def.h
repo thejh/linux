@@ -39,6 +39,10 @@ enum stat_item {
 	CPU_PARTIAL_FREE,	/* Refill cpu partial on free */
 	CPU_PARTIAL_NODE,	/* Refill cpu partial from node partial */
 	CPU_PARTIAL_DRAIN,	/* Drain cpu partial to node partial */
+#ifdef CONFIG_SLAB_VIRTUAL
+	VIRTUAL_SLAB_NEW,
+	VIRTUAL_SLAB_REUSED,
+#endif
 	NR_SLUB_STAT_ITEMS
 };
 
