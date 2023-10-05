@@ -2571,22 +2571,9 @@ static void slub_tlbflush_worker(struct kthread_work *work)
 }
 static DEFINE_KTHREAD_WORK(slub_tlbflush_work, slub_tlbflush_worker);
 
-static inline void queue_slab_tlb_flush(struct virtual_slab *slab)
-{
-	unsigned long irq_flags;
-
-	spin_lock_irqsave(&slub_kworker_lock, irq_flags);
-	list_add(&slab->slab.slab_list, &slub_tlbflush_queue);
-	spin_unlock_irqrestore(&slub_kworker_lock, irq_flags);
-	if (READ_ONCE(slub_kworker) != NULL)
-		kthread_queue_work(slub_kworker, &slub_tlbflush_work);
-}
-#else
-static inline void queue_slab_tlb_flush(struct virtual_slab *slab) {}
-#endif
-
 static void __free_slab_virtual(struct kmem_cache *s, struct virtual_slab *slab)
 {
+	unsigned long irq_flags;
 	int order = oo_order(slab->slab.oo);
 	unsigned long pages = 1UL << order;
 	unsigned long slab_base = (unsigned long)slab_address(&slab->slab);
@@ -2612,8 +2599,17 @@ static void __free_slab_virtual(struct kmem_cache *s, struct virtual_slab *slab)
 	 * which will flush the TLB for us and only then free the physical
 	 * memory.
 	 */
-	queue_slab_tlb_flush(slab);
+	spin_lock_irqsave(&slub_kworker_lock, irq_flags);
+	list_add(&slab->slab.slab_list, &slub_tlbflush_queue);
+	spin_unlock_irqrestore(&slub_kworker_lock, irq_flags);
+	if (READ_ONCE(slub_kworker) != NULL)
+		kthread_queue_work(slub_kworker, &slub_tlbflush_work);
 }
+#else
+static void __free_slab_virtual(struct kmem_cache *s, struct virtual_slab *slab)
+{
+}
+#endif /* CONFIG_SLAB_VIRTUAL */
 
 static void __free_slab(struct kmem_cache *s, struct slab *slab)
 {
