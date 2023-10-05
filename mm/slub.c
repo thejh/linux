@@ -7077,7 +7077,7 @@ static unsigned long vaddr_ranges_first_valid_slab(unsigned long pos)
 	struct virtual_slab *slab;
 
 	slub_valloc_lock(flags);
-	end_addr = slub_addr_base();
+	end_addr = slub_addr_base;
 	slub_valloc_unlock(flags);
 
 	if (pos == 0)
