@@ -2809,6 +2809,12 @@ void vfree(const void *addr)
 	struct vm_struct *vm;
 	int i;
 
+	/* XXX: hack for the gq driver */
+	if (slab_virtual_enabled() && unlikely(is_slab_virtual_addr(addr))) {
+		kfree(addr);
+		return;
+	}
+
 	if (unlikely(in_interrupt())) {
 		vfree_atomic(addr);
 		return;
