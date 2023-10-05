@@ -2204,6 +2204,7 @@ static struct virtual_slab *get_free_slab(struct kmem_cache *s,
 			s->virtual.nr_freed_pages - (1UL << slab_order(&slab->slab)));
 
 		spin_unlock_irqrestore(&s->virtual.freed_slabs_lock, flags);
+		stat(s, VIRTUAL_SLAB_REUSED);
 		return slab;
 	}
 
@@ -2227,6 +2228,7 @@ static struct virtual_slab *get_free_slab(struct kmem_cache *s,
 	if (s->red_left_pad == 0)
 		slab->align_mask |= (1 << (ffs(s->size) - 1)) - 1;
 
+	stat(s, VIRTUAL_SLAB_NEW);
 	return slab;
 }
 
@@ -6546,6 +6548,10 @@ STAT_ATTR(CPU_PARTIAL_ALLOC, cpu_partial_alloc);
 STAT_ATTR(CPU_PARTIAL_FREE, cpu_partial_free);
 STAT_ATTR(CPU_PARTIAL_NODE, cpu_partial_node);
 STAT_ATTR(CPU_PARTIAL_DRAIN, cpu_partial_drain);
+#ifdef CONFIG_SLAB_VIRTUAL
+STAT_ATTR(VIRTUAL_SLAB_NEW, virtual_slab_new);
+STAT_ATTR(VIRTUAL_SLAB_REUSED, virtual_slab_reused);
+#endif /* CONFIG_SLAB_VIRTUAL */
 #endif	/* CONFIG_SLUB_STATS */
 
 #ifdef CONFIG_KFENCE
@@ -6636,7 +6642,11 @@ static struct attribute *slab_attrs[] = {
 	&cpu_partial_free_attr.attr,
 	&cpu_partial_node_attr.attr,
 	&cpu_partial_drain_attr.attr,
+#ifdef CONFIG_SLAB_VIRTUAL
+	&virtual_slab_new_attr.attr,
+	&virtual_slab_reused_attr.attr,
 #endif
+#endif /* CONFIG_SLUB_STATS */
 #ifdef CONFIG_FAILSLAB
 	&failslab_attr.attr,
 #endif
