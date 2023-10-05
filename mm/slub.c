@@ -2555,11 +2555,11 @@ static void slub_tlbflush_worker(struct kthread_work *work)
 
 		/* IRQs are already off */
 		spin_lock(&s->virtual.freed_slabs_lock);
-		if (oo_order(slab->slab.oo) == oo_order(s->oo)) {
-			list_add(&slab->slab.slab_list, &s->virtual.freed_slabs);
-		} else {
-			WARN_ON(oo_order(slab->slab.oo) != oo_order(s->min));
+		if (oo_order(slab->slab.oo) == oo_order(s->min)) {
 			list_add(&slab->slab.slab_list, &s->virtual.freed_slabs_min);
+		} else {
+			WARN_ON(oo_order(slab->slab.oo) != oo_order(s->oo));
+			list_add(&slab->slab.slab_list, &s->virtual.freed_slabs);
 		}
 		WRITE_ONCE(s->virtual.nr_freed_pages, s->virtual.nr_freed_pages +
 			(1UL << slab_order(&slab->slab)));
