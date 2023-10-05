@@ -171,13 +171,15 @@
  */
 
 #ifdef CONFIG_SLAB_VIRTUAL
-unsigned long slub_addr_base = SLAB_DATA_BASE_ADDR;
+unsigned long slub_addr_base __ro_after_init = SLAB_DATA_BASE_ADDR;
+unsigned long slub_addr_current = SLAB_DATA_BASE_ADDR;
 static unsigned long slub_virtual_guard_size;
 
-/* Protects slub_addr_base */
+/* Protects slub_addr_current */
 static DEFINE_SPINLOCK(slub_valloc_spinlock);
 #define slub_valloc_lock(flags) spin_lock_irqsave(&slub_valloc_spinlock, flags)
 #define slub_valloc_unlock(flags) spin_unlock_irqrestore(&slub_valloc_spinlock, flags)
+
 DEFINE_STATIC_KEY_FALSE(slab_virtual_key);
 EXPORT_SYMBOL(slab_virtual_key);
 #endif
@@ -2086,12 +2088,12 @@ static struct virtual_slab *alloc_slab_meta(unsigned int order, gfp_t gfp_flags)
 
 	slub_valloc_lock(flags);
 retry_locked:
-	old_base = slub_addr_base;
+	old_base = slub_addr_current;
 
 	/*
 	 * We drop the lock. The following code might sleep during
 	 * page table allocation. Any mutations we make before rechecking
-	 * slub_addr_base are idempotent, so that's fine.
+	 * slub_addr_current are idempotent, so that's fine.
 	 */
 	slub_valloc_unlock(flags);
 
@@ -2168,11 +2170,11 @@ retry_locked:
 
 	/* Did we race with someone else who made forward progress? */
 	slub_valloc_lock(flags);
-	if (old_base != slub_addr_base)
+	if (old_base != slub_addr_current)
 		goto retry_locked;
 
 	/* Success! Grab the range for ourselves. */
-	slub_addr_base = data_range_end;
+	slub_addr_current = data_range_end;
 	slub_valloc_unlock(flags);
 
 	slab = (struct virtual_slab *)meta_range_start;
@@ -7096,19 +7098,20 @@ static unsigned long vaddr_ranges_first_valid_slab(unsigned long pos)
 	struct virtual_slab *slab;
 
 	slub_valloc_lock(flags);
-	end_addr = slub_addr_base;
+	end_addr = slub_addr_current;
 	slub_valloc_unlock(flags);
 
 	if (pos == 0)
-		pos = SLAB_DATA_BASE_ADDR;
+		pos = slub_addr_base;
 
 	for (; pos < end_addr; pos += PAGE_SIZE) {
 		slab = (struct virtual_slab *)virt_to_slab_virtual_raw(pos);
+
 		/* TODO hacky racy code */
-		if (READ_ONCE(slab->compound_slab_head) != slab)
+		if (slab->compound_slab_head != slab)
 			continue;
 
-		if (READ_ONCE(slab->slab.slab_cache) == NULL)
+		if (slab->slab.slab_cache == NULL)
 			continue;
 
 		return pos;
@@ -7122,7 +7125,7 @@ static void *vaddr_ranges_debug_start(struct seq_file *seq, loff_t *ppos)
 	unsigned long ret;
 
 	if (pos == 0)
-		pos = SLAB_DATA_BASE_ADDR;
+		pos = slub_addr_base;
 
 	ret = vaddr_ranges_first_valid_slab(pos);
 	*ppos = ret;

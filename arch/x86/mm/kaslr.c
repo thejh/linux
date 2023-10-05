@@ -144,6 +144,7 @@ void __init kernel_randomize_memory(void)
 	 */
 	prandom_bytes_state(&rand_state, &rand, sizeof(rand));
 	slub_addr_base += (rand & ((1UL << 36) - PAGE_SIZE));
+	slub_addr_current = slub_addr_base;
 #endif
 }
 

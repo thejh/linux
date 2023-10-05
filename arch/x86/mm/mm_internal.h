@@ -27,6 +27,7 @@ extern unsigned long tlb_single_page_flush_ceiling;
 
 #ifdef CONFIG_SLAB_VIRTUAL
 extern unsigned long slub_addr_base;
+extern unsigned long slub_addr_current;
 #endif
 
 #endif	/* __X86_MM_INTERNAL_H */
