@@ -172,6 +172,7 @@
 
 #ifdef CONFIG_SLAB_VIRTUAL
 unsigned long slub_addr_base = SLAB_DATA_BASE_ADDR;
+static unsigned long slub_virtual_guard_size;
 
 /* Protects slub_addr_base */
 static DEFINE_SPINLOCK(slub_valloc_spinlock);
@@ -1733,6 +1734,24 @@ static int __init setup_slab_virtual(char *str)
 	return 1;
 }
 __setup("slab_virtual=", setup_slab_virtual);
+
+static int __init setup_slab_virtual_guards(char *str)
+{
+	int enabled;
+
+	get_option(&str, &enabled);
+
+	if (enabled) {
+		pr_info("slab_virtual guard pages enabled\n");
+		slub_virtual_guard_size = PAGE_SIZE;
+	} else {
+		pr_info("slab_virtual guard pages disabled\n");
+		slub_virtual_guard_size = 0;
+	}
+
+	return 1;
+}
+__setup("slab_virtual_guards=", setup_slab_virtual_guards);
 #endif /* CONFIG_SLAB_VIRTUAL */
 
 /*
@@ -2083,7 +2102,7 @@ retry_locked:
 	 * relaxed based on the alignment requirements of the objects being
 	 * allocated, but for now, we behave like the page allocator would.
 	 */
-	data_range_start = ALIGN(old_base, alloc_size);
+	data_range_start = ALIGN(old_base + slub_virtual_guard_size, alloc_size);
 	data_range_end = data_range_start + alloc_size;
 
 	valid_start = data_range_start >= SLAB_DATA_BASE_ADDR &&
