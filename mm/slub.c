@@ -171,9 +171,7 @@
  */
 
 #ifdef CONFIG_SLAB_VIRTUAL
-unsigned long _slub_addr_base = SLAB_DATA_BASE_ADDR;
-static __always_inline unsigned long slub_addr_base(void) { return _slub_addr_base; }
-static __always_inline void set_slub_addr_base(unsigned long val) { _slub_addr_base = val; }
+unsigned long slub_addr_base = SLAB_DATA_BASE_ADDR;
 
 /* Protects slub_addr_base */
 static DEFINE_SPINLOCK(slub_valloc_spinlock);
@@ -181,14 +179,6 @@ static DEFINE_SPINLOCK(slub_valloc_spinlock);
 #define slub_valloc_unlock(flags) spin_unlock_irqrestore(&slub_valloc_spinlock, flags)
 DEFINE_STATIC_KEY_FALSE(slab_virtual_key);
 EXPORT_SYMBOL(slab_virtual_key);
-
-#else
-#define slub_valloc_lock(flags) ((void)flags)
-#define slub_valloc_unlock(flags) ((void)flags)
-
-static __always_inline unsigned long slub_addr_base(void) { return 0; }
-static __always_inline void set_slub_addr_base(unsigned long val) {}
-
 #endif
 
 
@@ -1986,6 +1976,7 @@ static inline void folio_clear_slab(struct folio *folio, struct slab *slab)
 		slab->backing_folio = NULL;
 }
 
+#ifdef CONFIG_SLAB_VIRTUAL
 /*
  * Make sure we have the necessary page tables for the given address.
  * Returns a pointer to the PTE, or NULL on allocation failure.
@@ -2076,7 +2067,7 @@ static struct virtual_slab *alloc_slab_meta(unsigned int order, gfp_t gfp_flags)
 
 	slub_valloc_lock(flags);
 retry_locked:
-	old_base = slub_addr_base();
+	old_base = slub_addr_base;
 
 	/*
 	 * We drop the lock. The following code might sleep during
@@ -2158,11 +2149,11 @@ retry_locked:
 
 	/* Did we race with someone else who made forward progress? */
 	slub_valloc_lock(flags);
-	if (old_base != slub_addr_base())
+	if (old_base != slub_addr_base)
 		goto retry_locked;
 
 	/* Success! Grab the range for ourselves. */
-	set_slub_addr_base(data_range_end);
+	slub_addr_base = data_range_end;
 	slub_valloc_unlock(flags);
 
 	slab = (struct virtual_slab *)meta_range_start;
@@ -2279,6 +2270,14 @@ static struct slab *alloc_slab_page_virtual(struct kmem_cache *s,
 
 	return (struct slab *)slab;
 }
+#else /* CONFIG_SLAB_VIRTUAL */
+static struct slab *alloc_slab_page_virtual(struct kmem_cache *s,
+		gfp_t meta_gfp_flags, gfp_t gfp_flags, int node,
+		struct kmem_cache_order_objects oo)
+{
+	return NULL;
+}
+#endif /* CONFIG_SLAB_VIRTUAL */
 
 static inline struct slab *alloc_slab_page(struct kmem_cache *s,
 		gfp_t meta_flags, gfp_t flags, int node,
