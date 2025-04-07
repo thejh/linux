@@ -7817,6 +7817,139 @@ static const struct file_operations slab_debugfs_fops = {
 	.release = slab_debug_trace_release,
 };
 
+
+struct slab_snapshot_overall_header {
+	u16 version;
+	u16 slab_record_len;
+	u16 obj_record_len;
+	u32 object_size;
+} __aligned((8));
+#define SLAB_SNAPSHOT_SLAB 0x51AB
+struct slab_snapshot_slab {
+	u16 type; // SLAB_SNAPSHOT_SLAB
+	aligned_u64 slab_vaddr;
+} __aligned((8));
+#define SLAB_SNAPSHOT_OBJECT 0xBEC7
+struct slab_snapshot_object {
+	u16 type; // SLAB_SNAPSHOT_OBJECT
+	aligned_u64 object_vaddr;
+	aligned_u64 alloc_ip;
+} __aligned((8));
+
+static int slab_snapshot_open(struct inode *inode, struct file *file)
+{
+	struct kmem_cache *s = inode->i_private;
+	size_t alloc_size;
+	size_t num_slabs, num_slabs_stored;
+	struct kmem_cache_node *n;
+	int node;
+	int list_i;
+	size_t per_slab_size;
+	void *data;
+	void *p;
+	struct slab_snapshot_overall_header *ohdr;
+	int err;
+	unsigned long *obj_map;
+
+	obj_map = bitmap_alloc(oo_objects(s->oo), GFP_KERNEL);
+	if (!obj_map)
+		return -ENOMEM;
+
+	num_slabs = 0;
+	for_each_kmem_cache_node(s, node, n)
+		num_slabs += node_nr_slabs(n);
+
+retry:
+	/* add some margin in case more slabs are allocated in between */
+	num_slabs += 16;
+	num_slabs += num_slabs/5;
+
+	per_slab_size = sizeof(struct slab_snapshot_slab) + oo_objects(s->oo) * sizeof(struct slab_snapshot_object);
+	alloc_size = sizeof(u64) + sizeof(struct slab_snapshot_overall_header);
+	alloc_size = size_add(alloc_size, size_mul(num_slabs, per_slab_size));
+
+	data = kvmalloc(alloc_size, GFP_KERNEL|__GFP_ZERO);
+	if (!data) {
+		err = -ENOMEM;
+		goto out_free_bitmap;
+	}
+	p = data + sizeof(u64);
+	ohdr = p;
+	ohdr->version = 1;
+	ohdr->slab_record_len = sizeof(struct slab_snapshot_slab);
+	ohdr->obj_record_len = sizeof(struct slab_snapshot_object);
+	ohdr->object_size = s->object_size;
+	p += sizeof(*ohdr);
+
+	num_slabs_stored = 0;
+	for_each_kmem_cache_node(s, node, n) {
+		unsigned long flags;
+		struct slab *slab;
+
+		spin_lock_irqsave(&n->list_lock, flags);
+		for (list_i = 0; list_i < 2; list_i++) list_for_each_entry(slab, (list_i ? &n->full : &n->partial), slab_list) {
+			struct slab_snapshot_slab *shdr;
+			void *slab_vaddr = slab_address(slab);
+			void *obj;
+
+			if (num_slabs_stored == num_slabs) {
+				/* this should only happen very rarely */
+				kvfree(data);
+				num_slabs = size_mul(num_slabs, 2);
+				goto retry;
+			}
+			shdr = p;
+			p += sizeof(*shdr);
+			shdr->type = SLAB_SNAPSHOT_SLAB;
+			shdr->slab_vaddr = (unsigned long)slab_vaddr;
+
+			__fill_map(obj_map, s, slab);
+			for_each_object(obj, s, slab_vaddr, slab->objects) {
+				struct slab_snapshot_object *ohdr;
+
+				/* filter out definitely-free objects */
+				if (test_bit(__obj_to_index(s, slab_vaddr, obj), obj_map))
+					continue;
+
+				ohdr = p;
+				p += sizeof(*ohdr);
+				ohdr->type = SLAB_SNAPSHOT_OBJECT;
+				ohdr->object_vaddr = (unsigned long)obj;
+				ohdr->alloc_ip = get_track(s, obj, TRACK_ALLOC)->addr;
+			}
+		}
+		spin_unlock_irqrestore(&n->list_lock, flags);
+	}
+
+	*(u64*)data = p - (data + sizeof(u64));
+	file->private_data = data;
+	err = 0;
+
+out_free_bitmap:
+	bitmap_free(obj_map);
+	return err;
+}
+
+static ssize_t slab_snapshot_read(struct file *file, char __user *to, size_t count, loff_t *ppos)
+{
+	size_t data_len = *(u64*)file->private_data;
+	void *data = file->private_data + sizeof(u64);
+
+	return simple_read_from_buffer(to, count, ppos, data, data_len);
+}
+
+static int slab_snapshot_release(struct inode *inode, struct file *file)
+{
+	kvfree(file->private_data);
+	return 0;
+}
+
+static const struct file_operations slab_snapshot_fops = {
+	.open    = slab_snapshot_open,
+	.read    = slab_snapshot_read,
+	.release = slab_snapshot_release,
+};
+
 static void debugfs_slab_add(struct kmem_cache *s)
 {
 	struct dentry *slab_cache_dir;
@@ -7831,6 +7964,8 @@ static void debugfs_slab_add(struct kmem_cache *s)
 
 	debugfs_create_file_aux_num("free_traces", 0400, slab_cache_dir, s,
 					TRACK_FREE, &slab_debugfs_fops);
+
+	debugfs_create_file("binary_snapshot", 0400, slab_cache_dir, s, &slab_snapshot_fops);
 }
 
 void debugfs_slab_release(struct kmem_cache *s)
