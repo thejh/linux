@@ -1069,7 +1069,7 @@ int kasan_brk_handler(struct pt_regs *regs, unsigned long esr)
 	void *addr = (void *)regs->regs[0];
 	u64 pc = regs->pc;
 
-	kasan_report(addr, size, write, pc);
+	kasan_report(addr, size, write ? KASAN_TYPE_WRITE : 0, pc);
 
 	/*
 	 * The instrumentation allows to control whether we can proceed after

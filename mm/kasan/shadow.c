@@ -28,13 +28,13 @@
 
 bool __kasan_check_read(const volatile void *p, unsigned int size)
 {
-	return kasan_check_range((void *)p, size, false, _RET_IP_);
+	return kasan_check_range((void *)p, size, 0, _RET_IP_);
 }
 EXPORT_SYMBOL(__kasan_check_read);
 
 bool __kasan_check_write(const volatile void *p, unsigned int size)
 {
-	return kasan_check_range((void *)p, size, true, _RET_IP_);
+	return kasan_check_range((void *)p, size, KASAN_TYPE_WRITE, _RET_IP_);
 }
 EXPORT_SYMBOL(__kasan_check_write);
 
@@ -50,7 +50,7 @@ EXPORT_SYMBOL(__kasan_check_write);
 #undef memset
 void *memset(void *addr, int c, size_t len)
 {
-	if (!kasan_check_range(addr, len, true, _RET_IP_))
+	if (!kasan_check_range(addr, len, KASAN_TYPE_WRITE, _RET_IP_))
 		return NULL;
 
 	return __memset(addr, c, len);
@@ -60,8 +60,8 @@ void *memset(void *addr, int c, size_t len)
 #undef memmove
 void *memmove(void *dest, const void *src, size_t len)
 {
-	if (!kasan_check_range(src, len, false, _RET_IP_) ||
-	    !kasan_check_range(dest, len, true, _RET_IP_))
+	if (!kasan_check_range(src, len, 0, _RET_IP_) ||
+	    !kasan_check_range(dest, len, KASAN_TYPE_WRITE, _RET_IP_))
 		return NULL;
 
 	return __memmove(dest, src, len);
@@ -71,8 +71,8 @@ void *memmove(void *dest, const void *src, size_t len)
 #undef memcpy
 void *memcpy(void *dest, const void *src, size_t len)
 {
-	if (!kasan_check_range(src, len, false, _RET_IP_) ||
-	    !kasan_check_range(dest, len, true, _RET_IP_))
+	if (!kasan_check_range(src, len, 0, _RET_IP_) ||
+	    !kasan_check_range(dest, len, KASAN_TYPE_WRITE, _RET_IP_))
 		return NULL;
 
 	return __memcpy(dest, src, len);
@@ -81,7 +81,7 @@ void *memcpy(void *dest, const void *src, size_t len)
 
 void *__asan_memset(void *addr, int c, ssize_t len)
 {
-	if (!kasan_check_range(addr, len, true, _RET_IP_))
+	if (!kasan_check_range(addr, len, KASAN_TYPE_WRITE, _RET_IP_))
 		return NULL;
 
 	return __memset(addr, c, len);
@@ -91,8 +91,8 @@ EXPORT_SYMBOL(__asan_memset);
 #ifdef __HAVE_ARCH_MEMMOVE
 void *__asan_memmove(void *dest, const void *src, ssize_t len)
 {
-	if (!kasan_check_range(src, len, false, _RET_IP_) ||
-	    !kasan_check_range(dest, len, true, _RET_IP_))
+	if (!kasan_check_range(src, len, 0, _RET_IP_) ||
+	    !kasan_check_range(dest, len, KASAN_TYPE_WRITE, _RET_IP_))
 		return NULL;
 
 	return __memmove(dest, src, len);
@@ -102,8 +102,8 @@ EXPORT_SYMBOL(__asan_memmove);
 
 void *__asan_memcpy(void *dest, const void *src, ssize_t len)
 {
-	if (!kasan_check_range(src, len, false, _RET_IP_) ||
-	    !kasan_check_range(dest, len, true, _RET_IP_))
+	if (!kasan_check_range(src, len, 0, _RET_IP_) ||
+	    !kasan_check_range(dest, len, KASAN_TYPE_WRITE, _RET_IP_))
 		return NULL;
 
 	return __memcpy(dest, src, len);

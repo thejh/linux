@@ -339,11 +339,11 @@ static __always_inline bool addr_has_metadata(const void *addr)
  * kasan_check_range - Check memory region, and report if invalid access.
  * @addr: the accessed address
  * @size: the accessed size
- * @write: true if access is a write access
+ * @flags: bitmask, can contain KASAN_TYPE_* flags
  * @ret_ip: return address
  * @return: true if access was valid, false if invalid
  */
-bool kasan_check_range(const void *addr, size_t size, bool write,
+bool kasan_check_range(const void *addr, size_t size, unsigned int flags,
 				unsigned long ret_ip);
 
 #else /* CONFIG_KASAN_GENERIC || CONFIG_KASAN_SW_TAGS */
@@ -379,7 +379,7 @@ static inline void kasan_print_aux_stacks(struct kmem_cache *cache, const void *
 #endif
 
 bool kasan_report(const void *addr, size_t size,
-		bool is_write, unsigned long ip);
+		unsigned int flags, unsigned long ip);
 void kasan_report_invalid_free(void *object, unsigned long ip, enum kasan_report_type type);
 
 struct slab *kasan_addr_to_slab(const void *addr);

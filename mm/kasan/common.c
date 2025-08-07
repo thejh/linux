@@ -571,7 +571,7 @@ void __kasan_mempool_unpoison_object(void *ptr, size_t size, unsigned long ip)
 bool __kasan_check_byte(const void *address, unsigned long ip)
 {
 	if (!kasan_byte_accessible(address)) {
-		kasan_report(address, 1, false, ip);
+		kasan_report(address, 1, 0, ip);
 		return false;
 	}
 	return true;

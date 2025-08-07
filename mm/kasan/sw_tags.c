@@ -72,7 +72,7 @@ u8 kasan_random_tag(void)
 	return (u8)(state % (KASAN_TAG_MAX + 1));
 }
 
-bool kasan_check_range(const void *addr, size_t size, bool write,
+bool kasan_check_range(const void *addr, size_t size, unsigned int flags,
 			unsigned long ret_ip)
 {
 	u8 tag;
@@ -83,7 +83,7 @@ bool kasan_check_range(const void *addr, size_t size, bool write,
 		return true;
 
 	if (unlikely(addr + size < addr))
-		return !kasan_report(addr, size, write, ret_ip);
+		return !kasan_report(addr, size, flags, ret_ip);
 
 	tag = get_tag((const void *)addr);
 
@@ -109,12 +109,12 @@ bool kasan_check_range(const void *addr, size_t size, bool write,
 
 	untagged_addr = kasan_reset_tag((const void *)addr);
 	if (unlikely(!addr_has_metadata(untagged_addr)))
-		return !kasan_report(addr, size, write, ret_ip);
+		return !kasan_report(addr, size, flags, ret_ip);
 	shadow_first = kasan_mem_to_shadow(untagged_addr);
 	shadow_last = kasan_mem_to_shadow(untagged_addr + size - 1);
 	for (shadow = shadow_first; shadow <= shadow_last; shadow++) {
 		if (*shadow != tag) {
-			return !kasan_report(addr, size, write, ret_ip);
+			return !kasan_report(addr, size, flags, ret_ip);
 		}
 	}
 
@@ -137,12 +137,12 @@ bool kasan_byte_accessible(const void *addr)
 #define DEFINE_HWASAN_LOAD_STORE(size)					\
 	void __hwasan_load##size##_noabort(void *addr)			\
 	{								\
-		kasan_check_range(addr, size, false, _RET_IP_);		\
+		kasan_check_range(addr, size, 0, _RET_IP_);		\
 	}								\
 	EXPORT_SYMBOL(__hwasan_load##size##_noabort);			\
 	void __hwasan_store##size##_noabort(void *addr)			\
 	{								\
-		kasan_check_range(addr, size, true, _RET_IP_);		\
+		kasan_check_range(addr, size, KASAN_TYPE_WRITE, _RET_IP_); \
 	}								\
 	EXPORT_SYMBOL(__hwasan_store##size##_noabort)
 
@@ -154,13 +154,13 @@ DEFINE_HWASAN_LOAD_STORE(16);
 
 void __hwasan_loadN_noabort(void *addr, ssize_t size)
 {
-	kasan_check_range(addr, size, false, _RET_IP_);
+	kasan_check_range(addr, size, 0, _RET_IP_);
 }
 EXPORT_SYMBOL(__hwasan_loadN_noabort);
 
 void __hwasan_storeN_noabort(void *addr, ssize_t size)
 {
-	kasan_check_range(addr, size, true, _RET_IP_);
+	kasan_check_range(addr, size, KASAN_TYPE_WRITE, _RET_IP_);
 }
 EXPORT_SYMBOL(__hwasan_storeN_noabort);
 
@@ -173,6 +173,6 @@ EXPORT_SYMBOL(__hwasan_tag_memory);
 void kasan_tag_mismatch(void *addr, unsigned long access_info,
 			unsigned long ret_ip)
 {
-	kasan_report(addr, 1 << (access_info & 0xf), access_info & 0x10,
-		     ret_ip);
+	kasan_report(addr, 1 << (access_info & 0xf),
+		(access_info & 0x10) ? KASAN_TYPE_WRITE : 0, ret_ip);
 }

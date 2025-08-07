@@ -568,13 +568,14 @@ void kasan_report_invalid_free(void *ptr, unsigned long ip, enum kasan_report_ty
  * user_access_save/restore(): kasan_report_invalid_free() cannot be called
  * from a UACCESS region, and kasan_report_async() is not used on x86.
  */
-bool kasan_report(const void *addr, size_t size, bool is_write,
+bool kasan_report(const void *addr, size_t size, unsigned int flags,
 			unsigned long ip)
 {
 	bool ret = true;
 	unsigned long ua_flags = user_access_save();
 	unsigned long irq_flags;
 	struct kasan_report_info info;
+	bool is_write = (flags & KASAN_TYPE_WRITE);
 
 	if (unlikely(report_suppressed_sw()) || unlikely(!report_enabled())) {
 		ret = false;

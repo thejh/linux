@@ -364,14 +364,14 @@ void kasan_print_address_stack_frame(const void *addr)
 #define DEFINE_ASAN_REPORT_LOAD(size)                     \
 void __asan_report_load##size##_noabort(void *addr) \
 {                                                         \
-	kasan_report(addr, size, false, _RET_IP_);	  \
+	kasan_report(addr, size, 0, _RET_IP_);	  \
 }                                                         \
 EXPORT_SYMBOL(__asan_report_load##size##_noabort)
 
 #define DEFINE_ASAN_REPORT_STORE(size)                     \
 void __asan_report_store##size##_noabort(void *addr) \
 {                                                          \
-	kasan_report(addr, size, true, _RET_IP_);	   \
+	kasan_report(addr, size, KASAN_TYPE_WRITE, _RET_IP_);	   \
 }                                                          \
 EXPORT_SYMBOL(__asan_report_store##size##_noabort)
 
@@ -388,12 +388,12 @@ DEFINE_ASAN_REPORT_STORE(16);
 
 void __asan_report_load_n_noabort(void *addr, ssize_t size)
 {
-	kasan_report(addr, size, false, _RET_IP_);
+	kasan_report(addr, size, 0, _RET_IP_);
 }
 EXPORT_SYMBOL(__asan_report_load_n_noabort);
 
 void __asan_report_store_n_noabort(void *addr, ssize_t size)
 {
-	kasan_report(addr, size, true, _RET_IP_);
+	kasan_report(addr, size, KASAN_TYPE_WRITE, _RET_IP_);
 }
 EXPORT_SYMBOL(__asan_report_store_n_noabort);

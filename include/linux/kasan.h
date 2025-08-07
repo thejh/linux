@@ -33,6 +33,8 @@ typedef unsigned int __bitwise kasan_vmalloc_flags_t;
 #define KASAN_VMALLOC_PAGE_RANGE 0x1 /* Apply exsiting page range */
 #define KASAN_VMALLOC_TLB_FLUSH  0x2 /* TLB flush */
 
+#define KASAN_TYPE_WRITE 0x1
+
 #if defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KASAN_SW_TAGS)
 
 #include <linux/pgtable.h>
@@ -526,11 +528,11 @@ static inline void *kasan_reset_tag(const void *addr)
  * kasan_report - print a report about a bad memory access detected by KASAN
  * @addr: address of the bad access
  * @size: size of the bad access
- * @is_write: whether the bad access is a write or a read
+ * @flags: bitmask, can contain KASAN_TYPE_* flags
  * @ip: instruction pointer for the accessibility check or the bad access itself
  */
 bool kasan_report(const void *addr, size_t size,
-		bool is_write, unsigned long ip);
+		unsigned int flags, unsigned long ip);
 
 #else /* CONFIG_KASAN_SW_TAGS || CONFIG_KASAN_HW_TAGS */
 

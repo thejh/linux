@@ -173,7 +173,7 @@ static __always_inline bool memory_is_poisoned(const void *addr, size_t size)
 }
 
 static __always_inline bool check_region_inline(const void *addr,
-						size_t size, bool write,
+						size_t size, unsigned int flags,
 						unsigned long ret_ip)
 {
 	if (!kasan_enabled())
@@ -183,21 +183,21 @@ static __always_inline bool check_region_inline(const void *addr,
 		return true;
 
 	if (unlikely(addr + size < addr))
-		return !kasan_report(addr, size, write, ret_ip);
+		return !kasan_report(addr, size, flags, ret_ip);
 
 	if (unlikely(!addr_has_metadata(addr)))
-		return !kasan_report(addr, size, write, ret_ip);
+		return !kasan_report(addr, size, flags, ret_ip);
 
 	if (likely(!memory_is_poisoned(addr, size)))
 		return true;
 
-	return !kasan_report(addr, size, write, ret_ip);
+	return !kasan_report(addr, size, flags, ret_ip);
 }
 
-bool kasan_check_range(const void *addr, size_t size, bool write,
+bool kasan_check_range(const void *addr, size_t size, unsigned int flags,
 					unsigned long ret_ip)
 {
-	return check_region_inline(addr, size, write, ret_ip);
+	return check_region_inline(addr, size, flags, ret_ip);
 }
 
 bool kasan_byte_accessible(const void *addr)
@@ -252,7 +252,7 @@ EXPORT_SYMBOL(__asan_unregister_globals);
 #define DEFINE_ASAN_LOAD_STORE(size)					\
 	void __asan_load##size(void *addr)				\
 	{								\
-		check_region_inline(addr, size, false, _RET_IP_);	\
+		check_region_inline(addr, size, 0, _RET_IP_);	\
 	}								\
 	EXPORT_SYMBOL(__asan_load##size);				\
 	__alias(__asan_load##size)					\
@@ -260,7 +260,7 @@ EXPORT_SYMBOL(__asan_unregister_globals);
 	EXPORT_SYMBOL(__asan_load##size##_noabort);			\
 	void __asan_store##size(void *addr)				\
 	{								\
-		check_region_inline(addr, size, true, _RET_IP_);	\
+		check_region_inline(addr, size, KASAN_TYPE_WRITE, _RET_IP_); \
 	}								\
 	EXPORT_SYMBOL(__asan_store##size);				\
 	__alias(__asan_store##size)					\
@@ -275,7 +275,7 @@ DEFINE_ASAN_LOAD_STORE(16);
 
 void __asan_loadN(void *addr, ssize_t size)
 {
-	kasan_check_range(addr, size, false, _RET_IP_);
+	kasan_check_range(addr, size, 0, _RET_IP_);
 }
 EXPORT_SYMBOL(__asan_loadN);
 
@@ -285,7 +285,7 @@ EXPORT_SYMBOL(__asan_loadN_noabort);
 
 void __asan_storeN(void *addr, ssize_t size)
 {
-	kasan_check_range(addr, size, true, _RET_IP_);
+	kasan_check_range(addr, size, KASAN_TYPE_WRITE, _RET_IP_);
 }
 EXPORT_SYMBOL(__asan_storeN);
 
