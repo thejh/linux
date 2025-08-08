@@ -23,6 +23,7 @@ enum kcov_mode {
 	KCOV_MODE_TRACE_CMP = 3,
 };
 
+#define KCOV_ENABLE_MEMORY (1 << 28)
 /*
  * Modifier for KCOV_MODE_TRACE_PC to record function entry/exit marked with
  * metadata bits.
@@ -31,6 +32,7 @@ enum kcov_mode {
 #define KCOV_IN_CTXSW	(1 << 30)
 
 #define KCOV_MODE_TRACE_PC_EXT (KCOV_MODE_TRACE_PC | KCOV_EXT_FORMAT)
+#define KCOV_MODE_TRACE_PC_AND_MEM (KCOV_MODE_TRACE_PC_EXT | KCOV_ENABLE_MEMORY)
 
 void kcov_task_init(struct task_struct *t);
 void kcov_task_exit(struct task_struct *t);
@@ -109,4 +111,13 @@ static inline void kcov_remote_start_usb_softirq(u64 id) {}
 static inline void kcov_remote_stop_softirq(void) {}
 
 #endif /* CONFIG_KCOV */
+
+#ifdef CONFIG_KCOV_MEMORY
+void __kcov_handle_memaccess(const volatile void *p, size_t size, unsigned int type,
+		unsigned long ret_ip);
+#else /* CONFIG_KCOV_MEMORY */
+static inline void __kcov_handle_memaccess(const volatile void *p, size_t size,
+		unsigned int type, unsigned long ret_ip) {}
+#endif /* CONFIG_KCOV_MEMORY */
+
 #endif /* _LINUX_KCOV_H */

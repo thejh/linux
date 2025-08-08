@@ -22,6 +22,7 @@ struct kcov_remote_arg {
 #define KCOV_ENABLE			_IO('c', 100)
 #define KCOV_DISABLE			_IO('c', 101)
 #define KCOV_REMOTE_ENABLE		_IOW('c', 102, struct kcov_remote_arg)
+#define KCOV_GET_MEMORY_RECORD_SIZE	_IO('c', 103)
 
 enum {
 	/*
@@ -41,6 +42,8 @@ enum {
 	 * (KCOV_RECORDFLAG_*).
 	 */
 	KCOV_TRACE_PC_EXT = 2,
+	/* Extended PC coverage mode with tracing of memory accesses. */
+	KCOV_TRACE_MEMORY_ACCESS = 3,
 };
 
 #define KCOV_RECORD_IP_MASK         0x00ffffffffffffff
@@ -50,6 +53,7 @@ enum {
 #define KCOV_RECORDFLAG_TYPE_EXIT   0x1000000000000000
 /* Summarized entry/exit events that occurred in an untraced region. */
 #define KCOV_RECORDFLAG_TYPE_EESUM  0x2000000000000000
+#define KCOV_RECORDFLAG_TYPE_MEMORY 0x3000000000000000
 
 /*
  * The format for the types of collected comparisons.
@@ -73,5 +77,25 @@ static inline __u64 kcov_remote_handle(__u64 subsys, __u64 inst)
 		return 0;
 	return subsys | inst;
 }
+
+/*
+ * Data format for memory access tracing mode.
+ * This is an extensible struct (it can be extended by appending elements);
+ * userspace can query the struct size used by the running kernel with
+ * KCOV_GET_MEMORY_ACCESS_RECORD_SIZE.
+ */
+#define MEMORY_ACCESS_RECORD_TYPE_MASK 0xf
+#define MEMORY_ACCESS_RECORD_TYPE_ACCESS 0x0
+/* flags for MEMORY_ACCESS_RECORD_TYPE_ACCESS */
+#define MEMORY_ACCESS_RECORD_WRITE 0x10
+#define MEMORY_ACCESS_RECORD_RMW 0x20
+#define MEMORY_ACCESS_RECORD_ATOMIC 0x40
+struct memory_access_record {
+	__aligned_u64 ip_address_and_kcov_flags;
+	__aligned_u64 data_address;
+	__u32 size;
+	__u32 flags; /* MEMORY_ACCESS_RECORD_* */
+	__aligned_u64 time;
+} __attribute__((aligned(8)));
 
 #endif /* _LINUX_KCOV_IOCTLS_H */

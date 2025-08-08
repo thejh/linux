@@ -13,6 +13,26 @@
 #include <linux/kcsan-checks.h>
 #include <linux/kmsan-checks.h>
 #include <linux/types.h>
+#ifdef CONFIG_KCOV_MEMORY
+/* For build speed, only include this header in builds that actually need it. */
+#include <uapi/linux/kcov.h>
+#endif
+
+#ifdef CONFIG_KCOV_MEMORY
+void _kcov_handle_memaccess(const volatile void *p, size_t size, unsigned int type);
+#else
+static __always_inline void _kcov_handle_memaccess(const volatile void *p,
+		size_t size, unsigned int type) {}
+/* Discard type argument to avoid depending on kcov header. */
+#define _kcov_handle_memaccess(p, size, type) _kcov_handle_memaccess((p), (size), 0)
+#endif
+
+#if defined(__SANITIZE_ADDRESS__) || !defined(CONFIG_KCOV_MEMORY)
+#define kcov_handle_memaccess _kcov_handle_memaccess
+#else
+static __always_inline void kcov_handle_memaccess(const volatile void *p,
+		size_t size, unsigned int type) {}
+#endif
 
 /**
  * instrument_read - instrument regular read access
@@ -24,6 +44,7 @@
  */
 static __always_inline void instrument_read(const volatile void *v, size_t size)
 {
+	kcov_handle_memaccess(v, size, 0);
 	kasan_check_read(v, size);
 	kcsan_check_read(v, size);
 }
@@ -38,6 +59,7 @@ static __always_inline void instrument_read(const volatile void *v, size_t size)
  */
 static __always_inline void instrument_write(const volatile void *v, size_t size)
 {
+	kcov_handle_memaccess(v, size, MEMORY_ACCESS_RECORD_WRITE);
 	kasan_check_write(v, size);
 	kcsan_check_write(v, size);
 }
@@ -52,6 +74,7 @@ static __always_inline void instrument_write(const volatile void *v, size_t size
  */
 static __always_inline void instrument_read_write(const volatile void *v, size_t size)
 {
+	kcov_handle_memaccess(v, size, MEMORY_ACCESS_RECORD_RMW);
 	kasan_check_write(v, size);
 	kcsan_check_read_write(v, size);
 }
@@ -79,6 +102,7 @@ static __always_inline void instrument_atomic_check_alignment(const volatile voi
  */
 static __always_inline void instrument_atomic_read(const volatile void *v, size_t size)
 {
+	kcov_handle_memaccess(v, size, MEMORY_ACCESS_RECORD_ATOMIC);
 	kasan_check_read(v, size);
 	kcsan_check_atomic_read(v, size);
 	instrument_atomic_check_alignment(v, size);
@@ -94,6 +118,7 @@ static __always_inline void instrument_atomic_read(const volatile void *v, size_
  */
 static __always_inline void instrument_atomic_write(const volatile void *v, size_t size)
 {
+	kcov_handle_memaccess(v, size, MEMORY_ACCESS_RECORD_WRITE|MEMORY_ACCESS_RECORD_ATOMIC);
 	kasan_check_write(v, size);
 	kcsan_check_atomic_write(v, size);
 	instrument_atomic_check_alignment(v, size);
@@ -109,6 +134,7 @@ static __always_inline void instrument_atomic_write(const volatile void *v, size
  */
 static __always_inline void instrument_atomic_read_write(const volatile void *v, size_t size)
 {
+	kcov_handle_memaccess(v, size, MEMORY_ACCESS_RECORD_RMW|MEMORY_ACCESS_RECORD_ATOMIC);
 	kasan_check_write(v, size);
 	kcsan_check_atomic_read_write(v, size);
 	instrument_atomic_check_alignment(v, size);
@@ -126,6 +152,7 @@ static __always_inline void instrument_atomic_read_write(const volatile void *v,
 static __always_inline void
 instrument_copy_to_user(void __user *to, const void *from, unsigned long n)
 {
+	kcov_handle_memaccess(from, n, 0);
 	kasan_check_read(from, n);
 	kcsan_check_read(from, n);
 	kmsan_copy_to_user(to, from, n, 0);
@@ -143,6 +170,7 @@ instrument_copy_to_user(void __user *to, const void *from, unsigned long n)
 static __always_inline void
 instrument_copy_from_user_before(const void *to, const void __user *from, unsigned long n)
 {
+	kcov_handle_memaccess(to, n, MEMORY_ACCESS_RECORD_WRITE);
 	kasan_check_write(to, n);
 	kcsan_check_write(to, n);
 }
@@ -176,6 +204,8 @@ instrument_copy_from_user_after(const void *to, const void __user *from,
 static __always_inline void instrument_memcpy_before(void *to, const void *from,
 						     unsigned long n)
 {
+	kcov_handle_memaccess(from, n, 0);
+	kcov_handle_memaccess(to, n, MEMORY_ACCESS_RECORD_WRITE);
 	kasan_check_write(to, n);
 	kasan_check_read(from, n);
 	kcsan_check_write(to, n);

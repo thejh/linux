@@ -2245,6 +2245,17 @@ config KCOV_ENABLE_COMPARISONS
 	  These operands can be used by fuzzing engines to improve the quality
 	  of fuzzing coverage.
 
+config KCOV_MEMORY
+	bool "Enable memory access trace collection by KCOV"
+	depends on KCOV
+	depends on KCOV_EXT_RECORDS
+	help
+	  Provide a KCOV mode which records memory access operations and allows
+	  userspace to inject execution delays to impose constraints on the
+	  order in which multithreaded execution happens.
+
+	  This is mainly useful for testing race condition bugs.
+
 config KCOV_INSTRUMENT_ALL
 	bool "Instrument all code by default"
 	depends on KCOV

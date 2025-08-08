@@ -239,7 +239,8 @@ void notrace __sanitizer_cov_trace_pc(void)
 {
 	struct task_struct *cur = current;
 
-	if ((READ_ONCE(cur->kcov_mode) & ~KCOV_EXT_FORMAT) != KCOV_MODE_TRACE_PC)
+	if ((READ_ONCE(cur->kcov_mode) & ~(KCOV_ENABLE_MEMORY|KCOV_EXT_FORMAT))
+	    != KCOV_MODE_TRACE_PC)
 		return;
 	/*
 	 * No bitops are needed here for setting the record type because
@@ -262,7 +263,7 @@ void notrace __sanitizer_cov_trace_pc_entry(void)
 	 * This hook replaces __sanitizer_cov_trace_pc() for the function entry
 	 * basic block; it should still emit a record even in classic kcov mode.
 	 */
-	if ((kcov_mode & ~(KCOV_EXT_FORMAT|KCOV_IN_CTXSW)) != KCOV_MODE_TRACE_PC)
+	if ((kcov_mode & ~(KCOV_ENABLE_MEMORY|KCOV_EXT_FORMAT|KCOV_IN_CTXSW)) != KCOV_MODE_TRACE_PC)
 		return;
 	if (kcov_mode & KCOV_IN_CTXSW) {
 		cur->kcov->suppressed_stack_delta++;
@@ -285,7 +286,7 @@ void notrace __sanitizer_cov_trace_pc_exit(void)
 	 * So unlike __sanitizer_cov_trace_pc_entry(), this PC should only be
 	 * reported in extended mode, where function exit events are recorded.
 	 */
-	if ((kcov_mode & ~KCOV_IN_CTXSW) != KCOV_MODE_TRACE_PC_EXT)
+	if ((kcov_mode & ~(KCOV_ENABLE_MEMORY|KCOV_IN_CTXSW)) != KCOV_MODE_TRACE_PC_EXT)
 		return;
 	if (kcov_mode & KCOV_IN_CTXSW) {
 		struct kcov *kcov = cur->kcov;
@@ -661,6 +662,8 @@ static int kcov_get_mode(unsigned long arg)
 #endif
 	else if (arg == KCOV_TRACE_PC_EXT)
 		return IS_ENABLED(CONFIG_KCOV_EXT_RECORDS) ? KCOV_MODE_TRACE_PC_EXT : -ENOTSUPP;
+	else if (arg == KCOV_TRACE_MEMORY_ACCESS)
+		return IS_ENABLED(CONFIG_KCOV_MEMORY) ? KCOV_MODE_TRACE_PC_AND_MEM : -ENOTSUPP;
 	else
 		return -EINVAL;
 }
@@ -801,6 +804,10 @@ static int kcov_ioctl_locked(struct kcov *kcov, unsigned int cmd,
 		/* Put either in kcov_task_exit() or in KCOV_DISABLE. */
 		kcov_get(kcov);
 		return 0;
+	case KCOV_GET_MEMORY_RECORD_SIZE:
+		if (!IS_ENABLED(CONFIG_KCOV_MEMORY))
+			return -ENOTSUPP;
+		return sizeof(struct memory_access_record);
 	default:
 		return -ENOTTY;
 	}
@@ -1172,7 +1179,8 @@ void kcov_remote_stop(void)
 	 * and kcov_remote_stop(), hence the sequence check.
 	 */
 	if (sequence == kcov->sequence && kcov->remote)
-		kcov_move_area(kcov->mode & ~KCOV_EXT_FORMAT, kcov->area, kcov->size, area);
+		kcov_move_area(kcov->mode & ~(KCOV_ENABLE_MEMORY|KCOV_EXT_FORMAT),
+			       kcov->area, kcov->size, area);
 	spin_unlock(&kcov->lock);
 
 	if (in_task()) {
@@ -1196,6 +1204,70 @@ struct kcov_common_handle_id kcov_common_handle(void)
 	return (struct kcov_common_handle_id){ .val = current->kcov_handle };
 }
 EXPORT_SYMBOL(kcov_common_handle);
+
+#ifdef CONFIG_KCOV_MEMORY
+static notrace bool kcov_get_memaccess_record(struct task_struct *t,
+					      struct memory_access_record **recordp)
+{
+	u64 *area = (u64 *)t->kcov_area;
+	/* The buffer was allocated for t->kcov_size unsigned longs. */
+	u64 max_pos = t->kcov_size * sizeof(unsigned long);
+	u64 count = READ_ONCE(area[0]);
+	u64 start_pos = sizeof(unsigned long) + count * sizeof(unsigned long);
+	u64 end_pos = start_pos + sizeof(struct memory_access_record);
+
+	if (unlikely(end_pos > max_pos))
+		return false;
+
+	/* See comment in kcov_add_pc_record(). */
+	WRITE_ONCE(area[0], count + sizeof(struct memory_access_record)/sizeof(unsigned long));
+	barrier();
+	*recordp = (void *)area + start_pos;
+	return true;
+}
+
+/*
+ * Memory ordering doesn't matter a lot here because timestamps aren't
+ * collected atomically with memory accesses anyway.
+ * The important things are that the clock access has to be uaccess-safe,
+ * notrace, and have high granularity.
+ */
+static notrace __always_inline u64 kcov_get_time(void)
+{
+#ifdef CONFIG_X86
+	return rdtsc_ordered();
+#else
+	return 0;
+#endif
+}
+
+void notrace __kcov_handle_memaccess(const volatile void *p, size_t size, unsigned int type,
+		unsigned long ret_ip)
+{
+	struct task_struct *t = current;
+	struct memory_access_record *record;
+	unsigned int kcov_mode = READ_ONCE(t->kcov_mode);
+
+	if (kcov_mode != KCOV_MODE_TRACE_PC_AND_MEM || !check_kcov_context(t))
+		return;
+	if (!kcov_get_memaccess_record(t, &record))
+		return;
+	*record = (struct memory_access_record) {
+		.ip_address_and_kcov_flags =
+			(ret_ip & KCOV_RECORD_IP_MASK) | KCOV_RECORDFLAG_TYPE_MEMORY,
+		.data_address = (u64)p,
+		.size = size,
+		.flags = type,
+		.time = kcov_get_time()
+	};
+}
+
+void notrace _kcov_handle_memaccess(const volatile void *p, size_t size, unsigned int type)
+{
+	__kcov_handle_memaccess(p, size, type, _RET_IP_);
+}
+EXPORT_SYMBOL(_kcov_handle_memaccess);
+#endif /* CONFIG_KCOV_MEMORY */
 
 #ifdef CONFIG_KCOV_SELFTEST
 static void __init selftest(void)
