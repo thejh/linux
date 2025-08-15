@@ -283,6 +283,8 @@ bool __kasan_slab_free(struct kmem_cache *cache, void *object, bool init,
 		return false;
 
 	poison_slab_object(cache, object, init);
+	_kcov_handle_memaccess(object, cache->object_size,
+				    MEMORY_ACCESS_RECORD_WRITE|MEMORY_ACCESS_RECORD_FREE);
 
 	if (no_quarantine)
 		return false;

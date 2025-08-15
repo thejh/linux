@@ -1434,6 +1434,9 @@ static __always_inline bool __free_pages_prepare(struct page *page,
 	if (init)
 		clear_highpages_kasan_tagged(page, 1 << order);
 
+	_kcov_handle_memaccess(page_address(page), (1 << order)*PAGE_SIZE,
+				    MEMORY_ACCESS_RECORD_WRITE|MEMORY_ACCESS_RECORD_FREE);
+
 	/*
 	 * arch_free_page() can make the page's contents inaccessible.  s390
 	 * does this.  So nothing which can access the page's contents should
