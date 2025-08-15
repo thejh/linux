@@ -2249,6 +2249,8 @@ config KCOV_MEMORY
 	bool "Enable memory access trace collection by KCOV"
 	depends on KCOV
 	depends on KCOV_EXT_RECORDS
+	depends on HAVE_KASAN_REPORT_EVERY_ACCESS
+	select KASAN_REPORT_EVERY_ACCESS
 	help
 	  Provide a KCOV mode which records memory access operations and allows
 	  userspace to inject execution delays to impose constraints on the

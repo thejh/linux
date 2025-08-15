@@ -28,13 +28,14 @@
 
 bool __kasan_check_read(const volatile void *p, unsigned int size)
 {
-	return kasan_check_range((void *)p, size, 0, _RET_IP_);
+	return kasan_check_range((void *)p, size, KASAN_TYPE_EXPLICIT, _RET_IP_);
 }
 EXPORT_SYMBOL(__kasan_check_read);
 
 bool __kasan_check_write(const volatile void *p, unsigned int size)
 {
-	return kasan_check_range((void *)p, size, KASAN_TYPE_WRITE, _RET_IP_);
+	return kasan_check_range((void *)p, size,
+		KASAN_TYPE_WRITE|KASAN_TYPE_EXPLICIT, _RET_IP_);
 }
 EXPORT_SYMBOL(__kasan_check_write);
 

@@ -32,6 +32,8 @@
 #include <linux/types.h>
 #include <linux/vmalloc.h>
 #include <linux/bug.h>
+#include <linux/kcov.h>
+#include <uapi/linux/kcov.h>
 
 #include "kasan.h"
 #include "../slab.h"
@@ -181,6 +183,19 @@ static __always_inline bool check_region_inline(const void *addr,
 
 	if (unlikely(size == 0))
 		return true;
+
+	/*
+	 * Do not route information about an access to KCOV if we got called
+	 * through the instrument_*() path - KCOV can get those accesses
+	 * directly from instrument_*(), and get a bit more metadata about the
+	 * access that way.
+	 */
+	if (likely((flags & KASAN_TYPE_EXPLICIT) == 0)) {
+		unsigned int kcov_flags =
+			(flags & KASAN_TYPE_WRITE) ? MEMORY_ACCESS_RECORD_WRITE : 0;
+
+		__kcov_handle_memaccess(addr, size, kcov_flags, ret_ip);
+	}
 
 	if (unlikely(addr + size < addr))
 		return !kasan_report(addr, size, flags, ret_ip);

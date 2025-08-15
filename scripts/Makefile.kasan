@@ -60,6 +60,23 @@ kasan_params += asan-instrumentation-with-call-threshold=$(call_threshold) \
 		asan-instrument-allocas=1 \
 		asan-globals=1
 
+# When we piggyback tracing of memory accesses for race condition testing on top
+# of KASAN, we want the compiler to report memory accesses even when KASAN can
+# prove that no UAF/OOB can occur; in particular, these optimizations must be
+# inhibited:
+#
+#  - suppression of ASAN hook calls for global variables
+#  - merging of multiple accesses in a basic block into a single ASAN hook call
+#
+# For now, known stack variable accesses are still ignored as a performance
+# tradeoff, though that will probably make a small number of races (where
+# another task concurrently accesses stuff on our stack) invisible to the
+# instrumentation. (Stack access instrumentation is gated on
+# asan-use-stack-safety and asan-skip-promotable-allocas.)
+ifdef CONFIG_KASAN_REPORT_EVERY_ACCESS
+kasan_params += asan-opt-globals=0 asan-opt-same-temp=0
+endif # CONFIG_KASAN_REPORT_EVERY_ACCESS
+
 # Instrument memcpy/memset/memmove calls by using instrumented __asan_mem*()
 # instead. With compilers that don't support this option, compiler-inserted
 # memintrinsics won't be checked by KASAN on GENERIC_ENTRY architectures.

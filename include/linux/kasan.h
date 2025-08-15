@@ -34,6 +34,7 @@ typedef unsigned int __bitwise kasan_vmalloc_flags_t;
 #define KASAN_VMALLOC_TLB_FLUSH  0x2 /* TLB flush */
 
 #define KASAN_TYPE_WRITE 0x1
+#define KASAN_TYPE_EXPLICIT 0x2
 
 #if defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KASAN_SW_TAGS)
 

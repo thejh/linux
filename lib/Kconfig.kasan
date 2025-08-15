@@ -228,4 +228,13 @@ config KASAN_EXTRA_INFO
 	  boot parameter, it will add 8 * stack_ring_size bytes of additional
 	  memory consumption.
 
+# Is KASAN_REPORT_EVERY_ACCESS allowed?
+config HAVE_KASAN_REPORT_EVERY_ACCESS
+	def_bool y
+	depends on KASAN_OUTLINE
+	depends on CC_IS_CLANG
+
+config KASAN_REPORT_EVERY_ACCESS
+	bool
+
 endif # KASAN
