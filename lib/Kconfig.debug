@@ -2215,6 +2215,20 @@ config KCOV
 
 	  For more details, see Documentation/dev-tools/kcov.rst.
 
+config KCOV_EXT_RECORDS
+	bool "Support extended KCOV records with function entry/exit records"
+	depends on KCOV
+	depends on 64BIT
+	# TODO: check CLANG_VERSION instead once this has landed in an LLVM
+	# release
+	depends on $(cc-option,-fsanitize-coverage=trace-pc-entry-exit)
+	help
+	  Extended KCOV records allow distinguishing between multiple types of
+	  records: Normal edge coverage, function entry, and function exit.
+
+	  This will likely cause a small additional slowdown compared to normal
+	  KCOV.
+
 config KCOV_ENABLE_COMPARISONS
 	bool "Enable comparison operands collection by KCOV"
 	depends on KCOV

@@ -202,15 +202,10 @@ static notrace unsigned long canonicalize_ip(unsigned long ip)
 	return ip;
 }
 
-/*
- * Entry point from instrumented code.
- * This is called once per basic-block/edge.
- */
-void notrace __sanitizer_cov_trace_pc(void)
+static void notrace kcov_add_pc_record(unsigned long record)
 {
 	struct task_struct *t;
 	unsigned long *area;
-	unsigned long ip = canonicalize_ip(_RET_IP_);
 	unsigned long pos;
 
 	t = current;
@@ -230,10 +225,31 @@ void notrace __sanitizer_cov_trace_pc(void)
 		 */
 		WRITE_ONCE(area[0], pos);
 		barrier();
-		area[pos] = ip;
+		area[pos] = record;
 	}
 }
+
+/*
+ * Entry point from instrumented code.
+ * This is called once per basic-block/edge.
+ */
+void notrace __sanitizer_cov_trace_pc(void)
+{
+	kcov_add_pc_record(canonicalize_ip(_RET_IP_));
+}
 EXPORT_SYMBOL(__sanitizer_cov_trace_pc);
+
+#ifdef CONFIG_KCOV_EXT_RECORDS
+void notrace __sanitizer_cov_trace_pc_entry(void)
+{
+	unsigned long record = canonicalize_ip(_RET_IP_);
+
+	kcov_add_pc_record(record);
+}
+void notrace __sanitizer_cov_trace_pc_exit(void)
+{
+}
+#endif
 
 #ifdef CONFIG_KCOV_ENABLE_COMPARISONS
 static void notrace write_comp_data(u64 type, u64 arg1, u64 arg2, u64 ip)
