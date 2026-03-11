@@ -23,7 +23,14 @@ enum kcov_mode {
 	KCOV_MODE_TRACE_CMP = 3,
 };
 
+/*
+ * Modifier for KCOV_MODE_TRACE_PC to record function entry/exit marked with
+ * metadata bits.
+ */
+#define KCOV_EXT_FORMAT	(1 << 29)
 #define KCOV_IN_CTXSW	(1 << 30)
+
+#define KCOV_MODE_TRACE_PC_EXT (KCOV_MODE_TRACE_PC | KCOV_EXT_FORMAT)
 
 void kcov_task_init(struct task_struct *t);
 void kcov_task_exit(struct task_struct *t);

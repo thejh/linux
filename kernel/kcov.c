@@ -55,7 +55,12 @@ struct kcov {
 	refcount_t		refcount;
 	/* The lock protects mode, size, area and t. */
 	spinlock_t		lock;
-	enum kcov_mode		mode __guarded_by(&lock);
+	/*
+	 * Mode, consists of:
+	 *  - enum kcov_mode
+	 *  - flag KCOV_EXT_FORMAT
+	 */
+	unsigned int		mode __guarded_by(&lock);
 	/* Size of arena (in long's). */
 	unsigned int		size __guarded_by(&lock);
 	/* Coverage buffer shared with user space. */
@@ -232,8 +237,14 @@ void notrace __sanitizer_cov_trace_pc(void)
 {
 	struct task_struct *cur = current;
 
-	if (READ_ONCE(cur->kcov_mode) != KCOV_MODE_TRACE_PC)
+	if ((READ_ONCE(cur->kcov_mode) & ~KCOV_EXT_FORMAT) != KCOV_MODE_TRACE_PC)
 		return;
+	/*
+	 * No bitops are needed here for setting the record type because
+	 * KCOV_RECORDFLAG_TYPE_NORMAL has the high bits set.
+	 * This relies on userspace not caring about the rest of the top byte
+	 * for KCOV_RECORDFLAG_TYPE_NORMAL records.
+	 */
 	kcov_add_pc_record(cur, canonicalize_ip(_RET_IP_));
 }
 EXPORT_SYMBOL(__sanitizer_cov_trace_pc);
@@ -249,12 +260,28 @@ void notrace __sanitizer_cov_trace_pc_entry(void)
 	 * This hook replaces __sanitizer_cov_trace_pc() for the function entry
 	 * basic block; it should still emit a record even in classic kcov mode.
 	 */
-	if (kcov_mode != KCOV_MODE_TRACE_PC)
+	if ((kcov_mode & ~KCOV_EXT_FORMAT) != KCOV_MODE_TRACE_PC)
 		return;
+	if ((kcov_mode & KCOV_EXT_FORMAT) != 0)
+		record = (record & KCOV_RECORD_IP_MASK) | KCOV_RECORDFLAG_TYPE_ENTRY;
 	kcov_add_pc_record(cur, record);
 }
 void notrace __sanitizer_cov_trace_pc_exit(void)
 {
+	struct task_struct *cur = current;
+	unsigned long record;
+
+	/*
+	 * This hook is not called at the beginning of a basic block; the basic
+	 * block from which the hook was invoked is already covered by a
+	 * preceding hook call.
+	 * So unlike __sanitizer_cov_trace_pc_entry(), this PC should only be
+	 * reported in extended mode, where function exit events are recorded.
+	 */
+	if (READ_ONCE(cur->kcov_mode) != KCOV_MODE_TRACE_PC_EXT)
+		return;
+	record = (canonicalize_ip(_RET_IP_) & KCOV_RECORD_IP_MASK) | KCOV_RECORDFLAG_TYPE_EXIT;
+	kcov_add_pc_record(cur, record);
 }
 #endif
 
@@ -377,7 +404,7 @@ EXPORT_SYMBOL(__sanitizer_cov_trace_switch);
 #endif /* ifdef CONFIG_KCOV_ENABLE_COMPARISONS */
 
 static void kcov_start(struct task_struct *t, struct kcov *kcov,
-			unsigned int size, void *area, enum kcov_mode mode,
+			unsigned int size, void *area, unsigned int mode,
 			int sequence)
 {
 	kcov_debug("t = %px, size = %u, area = %px\n", t, size, area);
@@ -588,6 +615,8 @@ static int kcov_get_mode(unsigned long arg)
 #else
 		return -ENOTSUPP;
 #endif
+	else if (arg == KCOV_TRACE_PC_EXT)
+		return IS_ENABLED(CONFIG_KCOV_EXT_RECORDS) ? KCOV_MODE_TRACE_PC_EXT : -ENOTSUPP;
 	else
 		return -EINVAL;
 }
@@ -1099,7 +1128,7 @@ void kcov_remote_stop(void)
 	 * and kcov_remote_stop(), hence the sequence check.
 	 */
 	if (sequence == kcov->sequence && kcov->remote)
-		kcov_move_area(kcov->mode, kcov->area, kcov->size, area);
+		kcov_move_area(kcov->mode & ~KCOV_EXT_FORMAT, kcov->area, kcov->size, area);
 	spin_unlock(&kcov->lock);
 
 	if (in_task()) {
