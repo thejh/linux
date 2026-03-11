@@ -71,6 +71,8 @@ struct kcov {
 	 * kcov_remote_stop(), see the comment there.
 	 */
 	int			sequence;
+	/* Whether emitted records should have type bits. */
+	unsigned int kcov_ext_format : 1 __guarded_by(&lock);
 };
 
 struct kcov_remote_area {
@@ -97,6 +99,7 @@ struct kcov_percpu_data {
 	void			*saved_area;
 	struct kcov		*saved_kcov;
 	int			saved_sequence;
+	unsigned int		saved_kcov_ext_format : 1;
 };
 
 static DEFINE_PER_CPU(struct kcov_percpu_data, kcov_percpu_data) = {
@@ -235,6 +238,12 @@ static void notrace kcov_add_pc_record(unsigned long record)
  */
 void notrace __sanitizer_cov_trace_pc(void)
 {
+	/*
+	 * No bitops are needed here for setting the record type because
+	 * KCOV_RECORDFLAG_TYPE_NORMAL has the high bits set.
+	 * This relies on userspace not caring about the rest of the top byte
+	 * for KCOV_RECORDFLAG_TYPE_NORMAL records.
+	 */
 	kcov_add_pc_record(canonicalize_ip(_RET_IP_));
 }
 EXPORT_SYMBOL(__sanitizer_cov_trace_pc);
@@ -244,10 +253,26 @@ void notrace __sanitizer_cov_trace_pc_entry(void)
 {
 	unsigned long record = canonicalize_ip(_RET_IP_);
 
+	/*
+	 * This hook replaces __sanitizer_cov_trace_pc() for the function entry
+	 * basic block; it should still emit a record even in classic kcov mode.
+	 */
+	if (current->kcov_ext_format)
+		record = (record & KCOV_RECORD_IP_MASK) | KCOV_RECORDFLAG_TYPE_ENTRY;
 	kcov_add_pc_record(record);
 }
 void notrace __sanitizer_cov_trace_pc_exit(void)
 {
+	unsigned long record;
+
+	/*
+	 * Unlike __sanitizer_cov_trace_pc_entry(), this PC should only be
+	 * reported in extended mode.
+	 */
+	if (!current->kcov_ext_format)
+		return;
+	record = (canonicalize_ip(_RET_IP_) & KCOV_RECORD_IP_MASK) | KCOV_RECORDFLAG_TYPE_EXIT;
+	kcov_add_pc_record(record);
 }
 #endif
 
@@ -371,7 +396,7 @@ EXPORT_SYMBOL(__sanitizer_cov_trace_switch);
 
 static void kcov_start(struct task_struct *t, struct kcov *kcov,
 			unsigned int size, void *area, enum kcov_mode mode,
-			int sequence)
+			int sequence, unsigned int kcov_ext_format)
 {
 	kcov_debug("t = %px, size = %u, area = %px\n", t, size, area);
 	t->kcov = kcov;
@@ -379,6 +404,7 @@ static void kcov_start(struct task_struct *t, struct kcov *kcov,
 	t->kcov_size = size;
 	t->kcov_area = area;
 	t->kcov_sequence = sequence;
+	t->kcov_ext_format = kcov_ext_format;
 	/* See comment in check_kcov_mode(). */
 	barrier();
 	WRITE_ONCE(t->kcov_mode, mode);
@@ -398,6 +424,7 @@ static void kcov_task_reset(struct task_struct *t)
 	kcov_stop(t);
 	t->kcov_sequence = 0;
 	t->kcov_handle = 0;
+	t->kcov_ext_format = 0;
 }
 
 void kcov_task_init(struct task_struct *t)
@@ -570,6 +597,8 @@ static int kcov_get_mode(unsigned long arg)
 #else
 		return -ENOTSUPP;
 #endif
+	else if (arg == KCOV_TRACE_PC_EXT)
+		return IS_ENABLED(CONFIG_KCOV_EXT_RECORDS) ? KCOV_MODE_TRACE_PC : -ENOTSUPP;
 	else
 		return -EINVAL;
 }
@@ -636,8 +665,9 @@ static int kcov_ioctl_locked(struct kcov *kcov, unsigned int cmd,
 			return mode;
 		kcov_fault_in_area(kcov);
 		kcov->mode = mode;
+		kcov->kcov_ext_format = (arg == KCOV_TRACE_PC_EXT);
 		kcov_start(t, kcov, kcov->size, kcov->area, kcov->mode,
-				kcov->sequence);
+				kcov->sequence, kcov->kcov_ext_format);
 		kcov->t = t;
 		/* Put either in kcov_task_exit() or in KCOV_DISABLE. */
 		kcov_get(kcov);
@@ -668,7 +698,8 @@ static int kcov_ioctl_locked(struct kcov *kcov, unsigned int cmd,
 			return -EINVAL;
 		kcov->mode = mode;
 		t->kcov = kcov;
-	        t->kcov_mode = KCOV_MODE_REMOTE;
+		t->kcov_mode = KCOV_MODE_REMOTE;
+		kcov->kcov_ext_format = (remote_arg->trace_mode == KCOV_TRACE_PC_EXT);
 		kcov->t = t;
 		kcov->remote = true;
 		kcov->remote_size = remote_arg->area_size;
@@ -853,6 +884,7 @@ static void kcov_remote_softirq_start(struct task_struct *t)
 		data->saved_area = t->kcov_area;
 		data->saved_sequence = t->kcov_sequence;
 		data->saved_kcov = t->kcov;
+		data->saved_kcov_ext_format = t->kcov_ext_format;
 		kcov_stop(t);
 	}
 }
@@ -865,12 +897,14 @@ static void kcov_remote_softirq_stop(struct task_struct *t)
 	if (data->saved_kcov) {
 		kcov_start(t, data->saved_kcov, data->saved_size,
 				data->saved_area, data->saved_mode,
-				data->saved_sequence);
+				data->saved_sequence,
+				data->saved_kcov_ext_format);
 		data->saved_mode = 0;
 		data->saved_size = 0;
 		data->saved_area = NULL;
 		data->saved_sequence = 0;
 		data->saved_kcov = NULL;
+		data->saved_kcov_ext_format = 0;
 	}
 }
 
@@ -884,6 +918,7 @@ void kcov_remote_start(u64 handle)
 	unsigned int size;
 	int sequence;
 	unsigned long flags;
+	unsigned int kcov_ext_format;
 
 	if (WARN_ON(!kcov_check_handle(handle, true, true, true)))
 		return;
@@ -930,6 +965,7 @@ void kcov_remote_start(u64 handle)
 	 * acquired _after_ kcov->lock elsewhere.
 	 */
 	mode = context_unsafe(kcov->mode);
+	kcov_ext_format = context_unsafe(kcov->kcov_ext_format);
 	sequence = kcov->sequence;
 	if (in_task()) {
 		size = kcov->remote_size;
@@ -958,7 +994,7 @@ void kcov_remote_start(u64 handle)
 		kcov_remote_softirq_start(t);
 		t->kcov_softirq = 1;
 	}
-	kcov_start(t, kcov, size, area, mode, sequence);
+	kcov_start(t, kcov, size, area, mode, sequence, kcov_ext_format);
 
 	local_unlock_irqrestore(&kcov_percpu_data.lock, flags);
 

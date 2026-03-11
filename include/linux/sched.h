@@ -1519,8 +1519,10 @@ struct task_struct {
 	int				kcov_sequence;
 
 	/* Collect coverage from softirq context: */
-	unsigned int			kcov_softirq;
-#endif
+	unsigned int			kcov_softirq : 1;
+	/* Emit KCOV records in extended format: */
+	unsigned int			kcov_ext_format : 1;
+#endif /* CONFIG_KCOV */
 
 #ifdef CONFIG_MEMCG_V1
 	struct mem_cgroup		*memcg_in_oom;

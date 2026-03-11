@@ -35,7 +35,19 @@ enum {
 	KCOV_TRACE_PC = 0,
 	/* Collecting comparison operands mode. */
 	KCOV_TRACE_CMP = 1,
+	/*
+	 * Extended PC coverage collection mode.
+	 * In this mode, the top byte of the PC is replaced with flag bits
+	 * (KCOV_RECORDFLAG_*).
+	 */
+	KCOV_TRACE_PC_EXT = 2,
 };
+
+#define KCOV_RECORD_IP_MASK         0x00ffffffffffffff
+#define KCOV_RECORDFLAG_TYPEMASK    0xf000000000000000
+#define KCOV_RECORDFLAG_TYPE_NORMAL 0xf000000000000000
+#define KCOV_RECORDFLAG_TYPE_ENTRY  0x0000000000000000
+#define KCOV_RECORDFLAG_TYPE_EXIT   0x1000000000000000
 
 /*
  * The format for the types of collected comparisons.
