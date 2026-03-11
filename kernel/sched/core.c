@@ -5072,8 +5072,10 @@ static inline void kmap_local_sched_in(void)
  *
  * prepare_task_switch sets up locking and calls architecture specific
  * hooks.
+ *
+ * Must be inlined for kcov_prepare_switch().
  */
-static inline void
+static __always_inline void
 prepare_task_switch(struct rq *rq, struct task_struct *prev,
 		    struct task_struct *next)
 	__must_hold(__rq_lockp(rq))
@@ -5149,7 +5151,6 @@ static struct rq *finish_task_switch(struct task_struct *prev)
 	tick_nohz_task_switch();
 	finish_lock_switch(rq);
 	finish_arch_post_lock_switch();
-	kcov_finish_switch(current);
 	/*
 	 * kmap_local_sched_out() is invoked with rq::lock held and
 	 * interrupts disabled. There is no requirement for that, but the
@@ -5295,7 +5296,13 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	switch_to(prev, next, prev);
 	barrier();
 
-	return finish_task_switch(prev);
+	rq = finish_task_switch(prev);
+	/*
+	 * This has to happen outside finish_task_switch() to ensure that
+	 * entry/exit records are balanced.
+	 */
+	kcov_finish_switch(current);
+	return rq;
 }
 
 /*
