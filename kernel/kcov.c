@@ -171,10 +171,8 @@ static __always_inline bool in_softirq_really(void)
 	return in_serving_softirq() && !in_hardirq() && !in_nmi();
 }
 
-static notrace bool check_kcov_mode(enum kcov_mode needed_mode, struct task_struct *t)
+static notrace bool check_kcov_context(struct task_struct *t)
 {
-	unsigned int mode;
-
 	/*
 	 * We are interested in code coverage as a function of a syscall inputs,
 	 * so we ignore code executed in interrupts, unless we are in a remote
@@ -182,7 +180,6 @@ static notrace bool check_kcov_mode(enum kcov_mode needed_mode, struct task_stru
 	 */
 	if (!in_task() && !(in_softirq_really() && t->kcov_softirq))
 		return false;
-	mode = READ_ONCE(t->kcov_mode);
 	/*
 	 * There is some code that runs in interrupts but for which
 	 * in_interrupt() returns false (e.g. preempt_schedule_irq()).
@@ -191,7 +188,7 @@ static notrace bool check_kcov_mode(enum kcov_mode needed_mode, struct task_stru
 	 * kcov_start().
 	 */
 	barrier();
-	return mode == needed_mode;
+	return true;
 }
 
 static notrace unsigned long canonicalize_ip(unsigned long ip)
@@ -202,14 +199,12 @@ static notrace unsigned long canonicalize_ip(unsigned long ip)
 	return ip;
 }
 
-static __always_inline void notrace kcov_add_pc_record(unsigned long record)
+static __always_inline void notrace kcov_add_pc_record(struct task_struct *t, unsigned long record)
 {
-	struct task_struct *t;
 	unsigned long *area;
 	unsigned long pos;
 
-	t = current;
-	if (!check_kcov_mode(KCOV_MODE_TRACE_PC, t))
+	if (!check_kcov_context(t))
 		return;
 
 	area = t->kcov_area;
@@ -217,7 +212,7 @@ static __always_inline void notrace kcov_add_pc_record(unsigned long record)
 	pos = READ_ONCE(area[0]) + 1;
 	if (likely(pos < t->kcov_size)) {
 		/* Previously we write pc before updating pos. However, some
-		 * early interrupt code could bypass check_kcov_mode() check
+		 * early interrupt code could bypass check_kcov_context() check
 		 * and invoke __sanitizer_cov_trace_pc(). If such interrupt is
 		 * raised between writing pc and updating pos, the pc could be
 		 * overitten by the recursive __sanitizer_cov_trace_pc().
@@ -235,20 +230,28 @@ static __always_inline void notrace kcov_add_pc_record(unsigned long record)
  */
 void notrace __sanitizer_cov_trace_pc(void)
 {
-	kcov_add_pc_record(canonicalize_ip(_RET_IP_));
+	struct task_struct *cur = current;
+
+	if (READ_ONCE(cur->kcov_mode) != KCOV_MODE_TRACE_PC)
+		return;
+	kcov_add_pc_record(cur, canonicalize_ip(_RET_IP_));
 }
 EXPORT_SYMBOL(__sanitizer_cov_trace_pc);
 
 #ifdef CONFIG_KCOV_EXT_RECORDS
 void notrace __sanitizer_cov_trace_pc_entry(void)
 {
+	struct task_struct *cur = current;
 	unsigned long record = canonicalize_ip(_RET_IP_);
+	unsigned int kcov_mode = READ_ONCE(cur->kcov_mode);
 
 	/*
 	 * This hook replaces __sanitizer_cov_trace_pc() for the function entry
 	 * basic block; it should still emit a record even in classic kcov mode.
 	 */
-	kcov_add_pc_record(record);
+	if (kcov_mode != KCOV_MODE_TRACE_PC)
+		return;
+	kcov_add_pc_record(cur, record);
 }
 void notrace __sanitizer_cov_trace_pc_exit(void)
 {
@@ -263,7 +266,7 @@ static void notrace write_comp_data(u64 type, u64 arg1, u64 arg2, u64 ip)
 	u64 count, start_index, end_pos, max_pos;
 
 	t = current;
-	if (!check_kcov_mode(KCOV_MODE_TRACE_CMP, t))
+	if (READ_ONCE(t->kcov_mode) != KCOV_MODE_TRACE_CMP || !check_kcov_context(t))
 		return;
 
 	ip = canonicalize_ip(ip);
@@ -383,7 +386,7 @@ static void kcov_start(struct task_struct *t, struct kcov *kcov,
 	t->kcov_size = size;
 	t->kcov_area = area;
 	t->kcov_sequence = sequence;
-	/* See comment in check_kcov_mode(). */
+	/* See comment in check_kcov_context(). */
 	barrier();
 	WRITE_ONCE(t->kcov_mode, mode);
 }
