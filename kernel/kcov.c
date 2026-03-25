@@ -76,6 +76,8 @@ struct kcov {
 	 * kcov_remote_stop(), see the comment there.
 	 */
 	int			sequence;
+	int			suppressed_stack_delta;
+	int			suppressed_stack_mindelta;
 };
 
 struct kcov_remote_area {
@@ -260,8 +262,12 @@ void notrace __sanitizer_cov_trace_pc_entry(void)
 	 * This hook replaces __sanitizer_cov_trace_pc() for the function entry
 	 * basic block; it should still emit a record even in classic kcov mode.
 	 */
-	if ((kcov_mode & ~KCOV_EXT_FORMAT) != KCOV_MODE_TRACE_PC)
+	if ((kcov_mode & ~(KCOV_EXT_FORMAT|KCOV_IN_CTXSW)) != KCOV_MODE_TRACE_PC)
 		return;
+	if (kcov_mode & KCOV_IN_CTXSW) {
+		cur->kcov->suppressed_stack_delta++;
+		return;
+	}
 	if ((kcov_mode & KCOV_EXT_FORMAT) != 0)
 		record = (record & KCOV_RECORD_IP_MASK) | KCOV_RECORDFLAG_TYPE_ENTRY;
 	kcov_add_pc_record(cur, record);
@@ -270,6 +276,7 @@ void notrace __sanitizer_cov_trace_pc_exit(void)
 {
 	struct task_struct *cur = current;
 	unsigned long record;
+	unsigned int kcov_mode = READ_ONCE(cur->kcov_mode);
 
 	/*
 	 * This hook is not called at the beginning of a basic block; the basic
@@ -278,8 +285,16 @@ void notrace __sanitizer_cov_trace_pc_exit(void)
 	 * So unlike __sanitizer_cov_trace_pc_entry(), this PC should only be
 	 * reported in extended mode, where function exit events are recorded.
 	 */
-	if (READ_ONCE(cur->kcov_mode) != KCOV_MODE_TRACE_PC_EXT)
+	if ((kcov_mode & ~KCOV_IN_CTXSW) != KCOV_MODE_TRACE_PC_EXT)
 		return;
+	if (kcov_mode & KCOV_IN_CTXSW) {
+		struct kcov *kcov = cur->kcov;
+
+		if (kcov->suppressed_stack_mindelta == kcov->suppressed_stack_delta)
+			kcov->suppressed_stack_mindelta--;
+		kcov->suppressed_stack_delta--;
+		return;
+	}
 	record = (canonicalize_ip(_RET_IP_) & KCOV_RECORD_IP_MASK) | KCOV_RECORDFLAG_TYPE_EXIT;
 	kcov_add_pc_record(cur, record);
 }
@@ -402,6 +417,35 @@ void notrace __sanitizer_cov_trace_switch(kcov_u64 val, void *arg)
 }
 EXPORT_SYMBOL(__sanitizer_cov_trace_switch);
 #endif /* ifdef CONFIG_KCOV_ENABLE_COMPARISONS */
+
+void kcov_prepare_switch(struct task_struct *cur)
+{
+#ifdef CONFIG_KCOV_EXT_RECORDS
+	struct kcov *kcov = cur->kcov;
+
+	if (kcov) {
+		kcov->suppressed_stack_mindelta = 0;
+		kcov->suppressed_stack_delta = 0;
+	}
+#endif
+	cur->kcov_mode |= KCOV_IN_CTXSW;
+}
+
+void kcov_finish_switch(struct task_struct *cur)
+{
+	struct kcov *kcov = cur->kcov;
+	unsigned long record;
+
+	cur->kcov_mode &= ~KCOV_IN_CTXSW;
+	if (!IS_ENABLED(CONFIG_KCOV_EXT_RECORDS))
+		return;
+	if ((cur->kcov_mode & KCOV_EXT_FORMAT) == 0)
+		return;
+	record = KCOV_RECORDFLAG_TYPE_EESUM |
+		(((u16)(s16)kcov->suppressed_stack_mindelta)<<16) |
+		(((u16)(s16)kcov->suppressed_stack_delta)<<16);
+	kcov_add_pc_record(cur, record);
+}
 
 static void kcov_start(struct task_struct *t, struct kcov *kcov,
 			unsigned int size, void *area, unsigned int mode,

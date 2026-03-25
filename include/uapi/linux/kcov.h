@@ -48,6 +48,8 @@ enum {
 #define KCOV_RECORDFLAG_TYPE_NORMAL 0xf000000000000000
 #define KCOV_RECORDFLAG_TYPE_ENTRY  0x0000000000000000
 #define KCOV_RECORDFLAG_TYPE_EXIT   0x1000000000000000
+/* Summarized entry/exit events that occurred in an untraced region. */
+#define KCOV_RECORDFLAG_TYPE_EESUM  0x2000000000000000
 
 /*
  * The format for the types of collected comparisons.
