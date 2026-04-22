@@ -2228,6 +2228,8 @@ config KCOV_EXT_RECORDS
 	depends on KCOV
 	depends on 64BIT
 	depends on $(cc-option,-fsanitize-coverage=trace-pc-entry-exit)
+	select ARCH_WANT_FRAME_POINTERS
+	select FRAME_POINTER
 	help
 	  Extended KCOV records allow distinguishing between multiple types of
 	  records: Normal edge coverage, function entry, and function exit.

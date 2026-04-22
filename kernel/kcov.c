@@ -206,7 +206,8 @@ static notrace unsigned long canonicalize_ip(unsigned long ip)
 	return ip;
 }
 
-static __always_inline void notrace kcov_add_pc_record(struct task_struct *t, unsigned long record)
+static __always_inline notrace
+void kcov_add_pc_record(struct task_struct *t, unsigned long record, bool hasext, unsigned long ext)
 {
 	unsigned long *area;
 	unsigned long pos;
@@ -217,7 +218,7 @@ static __always_inline void notrace kcov_add_pc_record(struct task_struct *t, un
 	area = t->kcov_area;
 	/* The first 64-bit word is the number of subsequent PCs. */
 	pos = READ_ONCE(area[0]) + 1;
-	if (likely(pos < t->kcov_size)) {
+	if (likely(pos + (hasext?1:0) < t->kcov_size)) {
 		/* Previously we write pc before updating pos. However, some
 		 * early interrupt code could bypass check_kcov_context() check
 		 * and invoke __sanitizer_cov_trace_pc(). If such interrupt is
@@ -225,9 +226,11 @@ static __always_inline void notrace kcov_add_pc_record(struct task_struct *t, un
 		 * overitten by the recursive __sanitizer_cov_trace_pc().
 		 * Update pos before writing pc to avoid such interleaving.
 		 */
-		WRITE_ONCE(area[0], pos);
+		WRITE_ONCE(area[0], pos + (hasext?1:0));
 		barrier();
 		area[pos] = record;
+		if (hasext)
+			area[pos+1] = ext;
 	}
 }
 
@@ -248,7 +251,7 @@ void notrace __sanitizer_cov_trace_pc(void)
 	 * This relies on userspace not caring about the rest of the top byte
 	 * for KCOV_RECORDFLAG_TYPE_NORMAL records.
 	 */
-	kcov_add_pc_record(cur, canonicalize_ip(_RET_IP_));
+	kcov_add_pc_record(cur, canonicalize_ip(_RET_IP_), false, 0);
 }
 EXPORT_SYMBOL(__sanitizer_cov_trace_pc);
 
@@ -258,6 +261,7 @@ void notrace __sanitizer_cov_trace_pc_entry(void)
 	struct task_struct *cur = current;
 	unsigned long record = canonicalize_ip(_RET_IP_);
 	unsigned int kcov_mode = READ_ONCE(cur->kcov_mode);
+	bool ext_format;
 
 	/*
 	 * This hook replaces __sanitizer_cov_trace_pc() for the function entry
@@ -269,9 +273,15 @@ void notrace __sanitizer_cov_trace_pc_entry(void)
 		cur->kcov->suppressed_stack_delta++;
 		return;
 	}
-	if ((kcov_mode & KCOV_EXT_FORMAT) != 0)
+	ext_format = (kcov_mode & KCOV_EXT_FORMAT) != 0;
+	if (ext_format)
 		record = (record & KCOV_RECORD_IP_MASK) | KCOV_RECORDFLAG_TYPE_ENTRY;
-	kcov_add_pc_record(cur, record);
+	/*
+	 * __builtin_return_address(1) is safe because this function is only
+	 * called from C functions, which are compiled with frame pointers
+	 * enabled
+	 */
+	kcov_add_pc_record(cur, record, ext_format, (unsigned long)__builtin_return_address(1));
 }
 void notrace __sanitizer_cov_trace_pc_exit(void)
 {
@@ -297,7 +307,7 @@ void notrace __sanitizer_cov_trace_pc_exit(void)
 		return;
 	}
 	record = (canonicalize_ip(_RET_IP_) & KCOV_RECORD_IP_MASK) | KCOV_RECORDFLAG_TYPE_EXIT;
-	kcov_add_pc_record(cur, record);
+	kcov_add_pc_record(cur, record, false, 0);
 }
 #endif
 
@@ -445,7 +455,7 @@ void kcov_finish_switch(struct task_struct *cur)
 	record = KCOV_RECORDFLAG_TYPE_EESUM |
 		(((u16)(s16)kcov->suppressed_stack_mindelta)<<16) |
 		(((u16)(s16)kcov->suppressed_stack_delta)<<16);
-	kcov_add_pc_record(cur, record);
+	kcov_add_pc_record(cur, record, false, 0);
 }
 
 static void kcov_start(struct task_struct *t, struct kcov *kcov,
