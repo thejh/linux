@@ -1219,6 +1219,7 @@ static const char *uaccess_safe_builtin[] = {
 	"__kcov_handle_memaccess",
 	"__sanitizer_cov_trace_pc",
 	"__sanitizer_cov_trace_pc_entry",
+	"kcov_di_enter_slowpath",
 	"__sanitizer_cov_trace_pc_exit",
 	"__sanitizer_cov_trace_const_cmp1",
 	"__sanitizer_cov_trace_const_cmp2",

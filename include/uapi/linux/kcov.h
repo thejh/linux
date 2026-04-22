@@ -3,6 +3,7 @@
 #define _LINUX_KCOV_IOCTLS_H
 
 #include <linux/types.h>
+#include <linux/ioctl.h>
 
 /*
  * Argument for KCOV_REMOTE_ENABLE ioctl, see Documentation/dev-tools/kcov.rst
@@ -23,6 +24,10 @@ struct kcov_remote_arg {
 #define KCOV_DISABLE			_IO('c', 101)
 #define KCOV_REMOTE_ENABLE		_IOW('c', 102, struct kcov_remote_arg)
 #define KCOV_GET_MEMORY_RECORD_SIZE	_IO('c', 103)
+#define KCOV_SET_DI			_IOW('c', 104, struct kcov_set_di_arg)
+#define KCOV_RESET_DI_FLAGS		_IO('c', 105)
+#define KCOV_WAKE_DI_FLAG		_IO('c', 106)
+#define KCOV_SPINWAIT_DI_FLAG		_IO('c', 107)
 
 enum {
 	/*
@@ -54,6 +59,11 @@ enum {
 /* Summarized entry/exit events that occurred in an untraced region. */
 #define KCOV_RECORDFLAG_TYPE_EESUM  0x2000000000000000
 #define KCOV_RECORDFLAG_TYPE_MEMORY 0x3000000000000000
+/* these two record types have a flag index in the low bits */
+#define KCOV_RECORDFLAG_TYPE_WAIT   0x4000000000000000
+#define KCOV_RECORDFLAG_TYPE_WAKE   0x5000000000000000
+/* set in KCOV_RECORDFLAG_TYPE_WAIT record to mark that the wait timed out */
+#define KCOV_WAIT_TIMEOUT           0x0010000000000000
 
 /*
  * The format for the types of collected comparisons.
@@ -100,5 +110,40 @@ struct memory_access_record {
 	__aligned_u64 time;
 	__aligned_u64 value;
 } __attribute__((aligned(8)));
+
+
+/*
+ * Delay Injection API
+ */
+struct kcov_di_stack_elem {
+	__aligned_u64 ip;
+	__aligned_u64 parent_idx;
+};
+enum di_stack_type {
+	DI_STACK_WAIT = 0,
+	DI_STACK_WAKE_PRE,
+	DI_STACK_WAKE_POST
+};
+struct kcov_di_stack {
+	__aligned_u64 elems;
+	__u32 num_elems;
+	enum di_stack_type type;
+	__u32 flagidx;
+};
+struct kcov_set_di_arg {
+	/*
+	 * Pointer to array of struct kcov_di_stack.
+	 * The array consists of function entry instruction addresses, with a
+	 * memory access instruction address at the end.
+	 * These must be addresses as reported in KCOV_RECORDFLAG_TYPE_ENTRY and
+	 * KCOV_RECORDFLAG_TYPE_MEMORY events (so they are not the addresses
+	 * where functions begin).
+	 */
+	__aligned_u64 stacks;
+	__u32 num_stacks;
+
+	int sync_bits_fd;
+	__aligned_u64 spin_limit;
+};
 
 #endif /* _LINUX_KCOV_IOCTLS_H */
