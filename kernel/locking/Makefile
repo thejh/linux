@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0
-# Any varying coverage in these files is non-deterministic
+ifndef CONFIG_KCOV_MEMORY
+# Any varying code coverage in these files is non-deterministic
 # and is generally not a function of system call inputs.
 KCOV_INSTRUMENT		:= n
+endif
 
 CONTEXT_ANALYSIS_mutex.o := y
 CONTEXT_ANALYSIS_rtmutex_api.o := y
