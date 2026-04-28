@@ -91,12 +91,14 @@ static inline __u64 kcov_remote_handle(__u64 subsys, __u64 inst)
 #define MEMORY_ACCESS_RECORD_RMW 0x20
 #define MEMORY_ACCESS_RECORD_ATOMIC 0x40
 #define MEMORY_ACCESS_RECORD_FREE 0x80
+#define MEMORY_ACCESS_RECORD_VALUE 0x100 /* value field is valid */
 struct memory_access_record {
 	__aligned_u64 ip_address_and_kcov_flags;
 	__aligned_u64 data_address;
 	__u32 size;
 	__u32 flags; /* MEMORY_ACCESS_RECORD_* */
 	__aligned_u64 time;
+	__aligned_u64 value;
 } __attribute__((aligned(8)));
 
 #endif /* _LINUX_KCOV_IOCTLS_H */

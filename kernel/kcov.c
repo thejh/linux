@@ -1270,6 +1270,26 @@ void notrace __kcov_handle_memaccess(const volatile void *p, size_t size, unsign
 		.flags = type,
 		.time = kcov_get_time()
 	};
+
+	switch (size) {
+	case 1:
+		__get_kernel_nofault((u8 *)&record->value, p, u8, handle_fault);
+		record->flags |= MEMORY_ACCESS_RECORD_VALUE;
+		break;
+	case 2:
+		__get_kernel_nofault((u16 *)&record->value, p, u16, handle_fault);
+		record->flags |= MEMORY_ACCESS_RECORD_VALUE;
+		break;
+	case 4:
+		__get_kernel_nofault((u32 *)&record->value, p, u32, handle_fault);
+		record->flags |= MEMORY_ACCESS_RECORD_VALUE;
+		break;
+	case 8:
+		__get_kernel_nofault((u64 *)&record->value, p, u64, handle_fault);
+		record->flags |= MEMORY_ACCESS_RECORD_VALUE;
+		break;
+	}
+handle_fault:;
 }
 
 void notrace _kcov_handle_memaccess(const volatile void *p, size_t size, unsigned int type)
