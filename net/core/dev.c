@@ -163,6 +163,7 @@
 #include <net/page_pool/memory_provider.h>
 #include <net/rps.h>
 #include <linux/phy_link_topology.h>
+#include <linux/kcov.h>
 
 #include "dev.h"
 #include "devmem.h"
@@ -6300,6 +6301,8 @@ static int __netif_receive_skb(struct sk_buff *skb)
 {
 	int ret;
 
+	kcov_remote_start_common(skb_get_kcov_handle(skb));
+
 	if (sk_memalloc_socks() && skb_pfmemalloc(skb)) {
 		unsigned int noreclaim_flag;
 
@@ -6318,6 +6321,7 @@ static int __netif_receive_skb(struct sk_buff *skb)
 	} else
 		ret = __netif_receive_skb_one_core(skb, false);
 
+	kcov_remote_stop();
 	return ret;
 }
 
