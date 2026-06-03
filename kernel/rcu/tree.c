@@ -64,6 +64,7 @@
 #include <linux/mm.h>
 #include <linux/kasan.h>
 #include <linux/context_tracking.h>
+#include <linux/kcov.h>
 #include "../time/tick-internal.h"
 
 #include "tree.h"
@@ -3126,6 +3127,43 @@ static void check_cb_ovld(struct rcu_data *rdp)
 	raw_spin_unlock_rcu_node(rnp);
 }
 
+struct big_rcu_head {
+	struct rcu_head rcu_head;
+	struct rcu_head *orig_head;
+	struct kcov_common_handle_id kcov_id;
+};
+
+/* debug-only code for CONFIG_KCOV */
+static void big_head_rcu_cb(struct rcu_head *big_head_)
+{
+	struct big_rcu_head *big_head = container_of(big_head_, struct big_rcu_head, rcu_head);
+
+	kcov_remote_start_common(big_head->kcov_id);
+	big_head->orig_head->func(big_head->orig_head);
+	kcov_remote_stop();
+	kfree(big_head);
+}
+
+/* debug-only code for CONFIG_KCOV */
+static inline void kcov_expand_rcu_head(struct rcu_head **headp, rcu_callback_t *funcp)
+{
+	struct kcov_common_handle_id kcov_handle = kcov_common_handle();
+	struct big_rcu_head *big_head;
+
+	if (kcov_common_handle_val(kcov_handle) == 0)
+		return;
+
+	big_head = kmalloc(sizeof(struct big_rcu_head), GFP_NOWAIT);
+	if (!big_head)
+		return;
+
+	(*headp)->func = *funcp;
+	big_head->orig_head = *headp;
+	*headp = &big_head->rcu_head;
+	*funcp = big_head_rcu_cb;
+	big_head->kcov_id = kcov_handle;
+}
+
 static void
 __call_rcu_common(struct rcu_head *head, rcu_callback_t func, bool lazy_in)
 {
@@ -3154,9 +3192,10 @@ __call_rcu_common(struct rcu_head *head, rcu_callback_t func, bool lazy_in)
 		WRITE_ONCE(head->func, rcu_leak_callback);
 		return;
 	}
+	kasan_record_aux_stack(head);
+	kcov_expand_rcu_head(&head, &func);
 	head->func = func;
 	head->next = NULL;
-	kasan_record_aux_stack(head);
 
 	local_irq_save(flags);
 	rdp = this_cpu_ptr(&rcu_data);
