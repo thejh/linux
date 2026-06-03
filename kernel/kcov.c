@@ -1360,7 +1360,7 @@ void kcov_remote_start(u64 handle)
 	 */
 	mode = context_unsafe(kcov->mode);
 	sequence = kcov->sequence;
-	if (in_task()) {
+	if (in_task() && !softirq_count()) {
 		size = kcov->remote_size;
 		area = kcov_remote_area_get(size);
 	} else {
@@ -1515,7 +1515,7 @@ void kcov_remote_stop(void)
 			       kcov->area, kcov->size, area);
 	spin_unlock(&kcov->lock);
 
-	if (in_task()) {
+	if (in_task() && !softirq_count()) {
 		spin_lock(&kcov_remote_lock);
 		kcov_remote_area_put(area, size);
 		spin_unlock(&kcov_remote_lock);
