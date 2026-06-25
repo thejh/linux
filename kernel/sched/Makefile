@@ -10,6 +10,7 @@ ccflags-y += $(call cc-disable-warning, unused-but-set-variable)
 # These files are disabled because they produce non-interesting flaky coverage
 # that is not a function of syscall inputs. E.g. involuntary context switches.
 KCOV_INSTRUMENT := n
+KCOV_INSTRUMENT_wait.o := y
 
 # Disable KCSAN to avoid excessive noise and performance degradation. To avoid
 # false positives ensure barriers implied by sched functions are instrumented.
