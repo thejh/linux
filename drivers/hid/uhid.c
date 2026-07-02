@@ -22,6 +22,7 @@
 #include <linux/spinlock.h>
 #include <linux/uhid.h>
 #include <linux/wait.h>
+#include <linux/kcov.h>
 
 #define UHID_NAME	"uhid"
 #define UHID_BUFSIZE	32
@@ -61,6 +62,7 @@ struct uhid_device {
 	u32 report_type;
 	struct uhid_event report_buf;
 	struct work_struct worker;
+	struct kcov_common_handle_id kcov_handle;
 };
 
 static struct miscdevice uhid_misc;
@@ -70,6 +72,7 @@ static void uhid_device_add_worker(struct work_struct *work)
 	struct uhid_device *uhid = container_of(work, struct uhid_device, worker);
 	int ret;
 
+	kcov_remote_start_common(uhid->kcov_handle);
 	ret = hid_add_device(uhid->hid);
 	if (ret) {
 		hid_err(uhid->hid, "Cannot register HID device: error %d\n", ret);
@@ -87,6 +90,7 @@ static void uhid_device_add_worker(struct work_struct *work)
 		WRITE_ONCE(uhid->running, false);
 		wake_up_interruptible(&uhid->report_wait);
 	}
+	kcov_remote_stop();
 }
 
 static void uhid_queue(struct uhid_device *uhid, struct uhid_event *ev)
@@ -647,6 +651,7 @@ static int uhid_char_open(struct inode *inode, struct file *file)
 	init_waitqueue_head(&uhid->report_wait);
 	uhid->running = false;
 	INIT_WORK(&uhid->worker, uhid_device_add_worker);
+	uhid->kcov_handle = kcov_common_handle();
 
 	file->private_data = uhid;
 	stream_open(inode, file);
