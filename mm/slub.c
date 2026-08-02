@@ -3505,6 +3505,8 @@ static struct slab *get_free_slab(struct kmem_cache *s,
 
 	if (likely(slab)) {
 		list_del(&slab->slab_list);
+		WRITE_ONCE(s->virtual.nr_freed_pages,
+			s->virtual.nr_freed_pages - (1UL << oo_order(slab->oo)));
 
 		spin_unlock_irqrestore(&s->virtual.freed_slabs_lock, flags);
 		return slab;
@@ -3555,6 +3557,8 @@ static struct slab *alloc_slab_page(struct kmem_cache *s,
 		/* Rollback: put the struct slab back. */
 		spin_lock_irqsave(&s->virtual.freed_slabs_lock, flags);
 		list_add(&slab->slab_list, freed_slabs);
+		WRITE_ONCE(s->virtual.nr_freed_pages,
+			s->virtual.nr_freed_pages + (1UL << oo_order(slab->oo)));
 		spin_unlock_irqrestore(&s->virtual.freed_slabs_lock, flags);
 
 		return NULL;
@@ -3803,6 +3807,8 @@ static void slub_tlbflush_worker(struct kthread_work *work)
 			WARN_ON(oo_order(slab->oo) != oo_order(s->oo));
 			list_add(&slab->slab_list, &s->virtual.freed_slabs);
 		}
+		WRITE_ONCE(s->virtual.nr_freed_pages, s->virtual.nr_freed_pages +
+			(1UL << oo_order(slab->oo)));
 		spin_unlock(&s->virtual.freed_slabs_lock);
 	}
 	spin_unlock_irqrestore(&slub_kworker_lock, irq_flags);
@@ -8236,6 +8242,7 @@ static inline void slab_virtual_open(struct kmem_cache *s)
 	spin_lock_init(&s->virtual.freed_slabs_lock);
 	INIT_LIST_HEAD(&s->virtual.freed_slabs);
 	INIT_LIST_HEAD(&s->virtual.freed_slabs_min);
+	s->virtual.nr_freed_pages = 0;
 #endif
 }
 
@@ -9644,6 +9651,14 @@ static ssize_t objects_partial_show(struct kmem_cache *s, char *buf)
 }
 SLAB_ATTR_RO(objects_partial);
 
+#ifdef CONFIG_SLAB_VIRTUAL
+static ssize_t deallocated_pages_show(struct kmem_cache *s, char *buf)
+{
+	return sysfs_emit(buf, "%lu\n", READ_ONCE(s->virtual.nr_freed_pages));
+}
+SLAB_ATTR_RO(deallocated_pages);
+#endif /* CONFIG_SLAB_VIRTUAL */
+
 static ssize_t slabs_cpu_partial_show(struct kmem_cache *s, char *buf)
 {
 	return sysfs_emit(buf, "0(0)\n");
@@ -9936,6 +9951,9 @@ static const struct attribute *const slab_attrs[] = {
 	&min_partial_attr.attr,
 	&cpu_partial_attr.attr,
 	&objects_partial_attr.attr,
+#ifdef CONFIG_SLAB_VIRTUAL
+	&deallocated_pages_attr.attr,
+#endif
 	&partial_attr.attr,
 	&cpu_slabs_attr.attr,
 	&ctor_attr.attr,
