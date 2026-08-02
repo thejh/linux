@@ -534,6 +534,30 @@ static inline freeptr_t freelist_ptr_encode(const struct kmem_cache *s,
 	return (freeptr_t){.v = encoded};
 }
 
+/*
+ * Does some validation of freelist pointers. Without SLAB_VIRTUAL this is
+ * currently a no-op.
+ */
+static inline bool freelist_pointer_corrupted(struct slab *slab, freeptr_t ptr,
+	void *decoded)
+{
+#ifdef CONFIG_SLAB_VIRTUAL
+	/*
+	 * If the freepointer decodes to 0, use 0 as the slab_base so that
+	 * the check below always passes (0 & slab->align_mask == 0).
+	 */
+	unsigned long slab_base = decoded ? (unsigned long)slab_to_virt(slab)
+		: 0;
+
+	return CHECK_DATA_CORRUPTION(
+		((unsigned long)decoded & slab->align_mask) != slab_base, NULL,
+		"bad freeptr (encoded %lx, ptr %p, base %lx, mask %lx",
+		ptr.v, decoded, slab_base, slab->align_mask);
+#else
+	return false;
+#endif
+}
+
 static inline void *freelist_ptr_decode(const struct kmem_cache *s,
 					freeptr_t ptr, unsigned long ptr_addr,
 					struct slab *slab)
@@ -545,6 +569,10 @@ static inline void *freelist_ptr_decode(const struct kmem_cache *s,
 #else
 	decoded = (void *)ptr.v;
 #endif
+
+	if (unlikely(freelist_pointer_corrupted(slab, ptr, decoded)))
+		return NULL;
+
 	return decoded;
 }
 
@@ -3516,6 +3544,21 @@ static struct slab *get_free_slab(struct kmem_cache *s,
 	slab = alloc_slab_meta(oo_order(oo), meta_gfp_flags);
 	if (slab == NULL)
 		return NULL;
+
+	/*
+	 * Bits that must be equal to start-of-slab address for all
+	 * objects inside the slab.
+	 * For compatibility with pointer tagging (like in HWASAN), this would
+	 * need to clear the pointer tag bits from the mask.
+	 */
+	slab->align_mask = ~((PAGE_SIZE << oo_order(oo)) - 1);
+
+	/*
+	 * Object alignment bits (must be zero, which is equal to the bits in
+	 * the start-of-slab address)
+	 */
+	if (s->red_left_pad == 0)
+		slab->align_mask |= (1 << (ffs(s->size) - 1)) - 1;
 
 	return slab;
 }
