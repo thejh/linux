@@ -173,6 +173,16 @@ static inline struct slab *page_slab(const struct page *page)
  */
 #define slab_page(s) folio_page(slab_folio(s), 0)
 
+/**
+ * is_slab_page - Checks if a page is really a slab page
+ * @s: The slab
+ *
+ * Checks if s points to a slab page.
+ *
+ * Return: true if s points to a slab and false otherwise.
+ */
+#define is_slab_page(s) folio_test_slab(slab_folio(s))
+
 static inline void *slab_address(const struct slab *slab)
 {
 	return folio_address(slab_folio(slab));
