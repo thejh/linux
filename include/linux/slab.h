@@ -718,6 +718,10 @@ enum kmalloc_cache_type {
 #endif
 	KMALLOC_PARTITION_START = KMALLOC_NORMAL,
 	KMALLOC_PARTITION_END = KMALLOC_PARTITION_START + KMALLOC_PARTITION_CACHES_NR,
+#ifndef CONFIG_MEMCG
+	KMALLOC_CGROUP_PARTITION_START = KMALLOC_NORMAL,
+	KMALLOC_CGROUP_PARTITION_END = KMALLOC_PARTITION_END,
+#endif
 #ifdef CONFIG_SLUB_TINY
 	KMALLOC_RECLAIM = KMALLOC_NORMAL,
 #else
@@ -728,6 +732,8 @@ enum kmalloc_cache_type {
 #endif
 #ifdef CONFIG_MEMCG
 	KMALLOC_CGROUP,
+	KMALLOC_CGROUP_PARTITION_START = KMALLOC_CGROUP,
+	KMALLOC_CGROUP_PARTITION_END = KMALLOC_CGROUP_PARTITION_START + KMALLOC_PARTITION_CACHES_NR,
 #endif
 #ifdef CONFIG_SLAB_OBJ_EXT
 	KMALLOC_NO_OBJ_EXT,
@@ -747,6 +753,19 @@ extern kmem_buckets kmalloc_caches[NR_KMALLOC_TYPES];
 	(IS_ENABLED(CONFIG_ZONE_DMA)   ? __GFP_DMA : 0) |	\
 	(IS_ENABLED(CONFIG_MEMCG) ? __GFP_ACCOUNT : 0))
 
+static __always_inline enum kmalloc_cache_type kmalloc_partition_cache(enum kmalloc_cache_type base, kmalloc_token_t token)
+{
+#ifdef CONFIG_KMALLOC_PARTITION_RANDOM
+	/* KMALLOC_PARTITION_CACHES_NR (=15) copies + the base */
+	return base + hash_64(token.v ^ random_kmalloc_seed,
+			      ilog2(KMALLOC_PARTITION_CACHES_NR + 1));
+#elif defined(CONFIG_KMALLOC_PARTITION_TYPED)
+	return base + token.v;
+#else
+	return base;
+#endif
+}
+
 static __always_inline enum kmalloc_cache_type kmalloc_type(gfp_t flags, kmalloc_token_t token)
 {
 	/*
@@ -754,15 +773,7 @@ static __always_inline enum kmalloc_cache_type kmalloc_type(gfp_t flags, kmalloc
 	 * with a single branch for all the relevant flags.
 	 */
 	if (likely((flags & KMALLOC_NOT_NORMAL_BITS) == 0))
-#ifdef CONFIG_KMALLOC_PARTITION_RANDOM
-		/* KMALLOC_PARTITION_CACHES_NR (=15) copies + the KMALLOC_NORMAL */
-		return KMALLOC_PARTITION_START + hash_64(token.v ^ random_kmalloc_seed,
-							 ilog2(KMALLOC_PARTITION_CACHES_NR + 1));
-#elif defined(CONFIG_KMALLOC_PARTITION_TYPED)
-		return KMALLOC_PARTITION_START + token.v;
-#else
-		return KMALLOC_NORMAL;
-#endif
+		return kmalloc_partition_cache(KMALLOC_PARTITION_START, token);
 
 	/*
 	 * At least one of the flags has to be set. Their priorities in
@@ -776,7 +787,7 @@ static __always_inline enum kmalloc_cache_type kmalloc_type(gfp_t flags, kmalloc
 	if (!IS_ENABLED(CONFIG_MEMCG) || (flags & __GFP_RECLAIMABLE))
 		return KMALLOC_RECLAIM;
 	else
-		return KMALLOC_CGROUP;
+		return kmalloc_partition_cache(KMALLOC_CGROUP_PARTITION_START, token);
 }
 
 /*
