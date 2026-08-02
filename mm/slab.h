@@ -11,6 +11,7 @@
 #include <linux/memcontrol.h>
 #include <linux/kfence.h>
 #include <linux/kasan.h>
+#include <linux/bug.h>
 #include <linux/slab.h>
 
 /*
@@ -121,6 +122,28 @@ static inline unsigned int oo_objects(struct kmem_cache_order_objects x)
 struct slab {
 	memdesc_flags_t flags;
 
+#ifdef CONFIG_SLAB_VIRTUAL
+	/*
+	 * Used by virt_to_slab to find the actual struct slab for a slab that
+	 * spans multiple pages.
+	 */
+	struct slab *compound_slab_head;
+
+	/*
+	 * Pointer to the folio that the objects are allocated from, or NULL if
+	 * the slab is currently unused and no physical memory is allocated to
+	 * it. Protected by slub_kworker_lock.
+	 */
+	struct folio *backing_folio;
+
+	struct kmem_cache_order_objects oo;
+
+	struct list_head flush_list_elem;
+
+	/* Replaces the page lock */
+	spinlock_t slab_lock;
+#endif
+
 	struct kmem_cache *slab_cache;
 	union {
 		struct {
@@ -131,13 +154,16 @@ struct slab {
 		struct rcu_head rcu_head;
 	};
 
+#ifndef CONFIG_SLAB_VIRTUAL
 	unsigned int __page_type;
 	atomic_t __page_refcount;
+#endif
 #ifdef CONFIG_SLAB_OBJ_EXT
 	unsigned long obj_exts;
 #endif
 };
 
+#ifndef CONFIG_SLAB_VIRTUAL
 #define SLAB_MATCH(pg, sl)						\
 	static_assert(offsetof(struct page, pg) == offsetof(struct slab, sl))
 SLAB_MATCH(flags, flags);
@@ -153,6 +179,9 @@ static_assert(sizeof(struct slab) <= sizeof(struct page));
 #if defined(system_has_freelist_aba)
 static_assert(IS_ALIGNED(offsetof(struct slab, freelist), sizeof(struct freelist_counters)));
 #endif
+#else /* CONFIG_SLAB_VIRTUAL */
+static_assert(sizeof(struct slab) <= STRUCT_SLAB_SIZE);
+#endif /* CONFIG_SLAB_VIRTUAL */
 
 /**
  * slab_folio - The folio allocated for a slab
@@ -165,9 +194,15 @@ static_assert(IS_ALIGNED(offsetof(struct slab, freelist), sizeof(struct freelist
  * helper function instead of casting yourself, as the implementation may change
  * in the future.
  */
+#ifndef CONFIG_SLAB_VIRTUAL
 #define slab_folio(s)		(_Generic((s),				\
 	const struct slab *:	(const struct folio *)s,		\
 	struct slab *:		(struct folio *)s))
+#else
+#define slab_folio(s) ((s)->backing_folio)
+#define folio_slab(folio) NULL
+static inline void *slab_to_virt(const struct slab *s);
+#endif /* CONFIG_SLAB_VIRTUAL */
 
 /**
  * page_slab - Converts from struct page to its slab.
@@ -203,16 +238,28 @@ static inline struct slab *page_slab(const struct page *page)
  *
  * Return: true if s points to a slab and false otherwise.
  */
+#ifndef CONFIG_SLAB_VIRTUAL
 #define is_slab_page(s) folio_test_slab(slab_folio(s))
+#else
+#define is_slab_page(s) is_slab_meta(s)
+#endif /* CONFIG_SLAB_VIRTUAL */
 
 static inline void *slab_address(const struct slab *slab)
 {
+#ifdef CONFIG_SLAB_VIRTUAL
+	return slab_to_virt(slab);
+#else
 	return folio_address(slab_folio(slab));
+#endif
 }
 
 static inline int slab_nid(const struct slab *slab)
 {
+#ifdef CONFIG_SLAB_VIRTUAL
+	return folio_nid(slab_folio(slab));
+#else
 	return memdesc_nid(slab->flags);
+#endif
 }
 
 static inline pg_data_t *slab_pgdat(const struct slab *slab)
@@ -220,10 +267,57 @@ static inline pg_data_t *slab_pgdat(const struct slab *slab)
 	return NODE_DATA(slab_nid(slab));
 }
 
+#ifdef CONFIG_SLAB_VIRTUAL
+/*
+ * Internal helper. Returns the address of the struct slab corresponding to
+ * the virtual memory page containing kaddr. This does a simple arithmetic
+ * mapping and does *not* return the struct slab of the head page!
+ */
+static inline unsigned long virt_to_slab_raw(unsigned long addr)
+{
+	VM_WARN_ON(!is_slab_addr(addr));
+	return SLAB_BASE_ADDR +
+		((addr - SLAB_DATA_BASE_ADDR) / PAGE_SIZE * sizeof(struct slab));
+}
+
+static inline struct slab *virt_to_slab(const void *addr)
+{
+	struct slab *slab, *slab_head;
+
+	if (!is_slab_addr(addr))
+		return NULL;
+
+	slab = (struct slab *)virt_to_slab_raw((unsigned long)addr);
+	slab_head = slab->compound_slab_head;
+
+	if (CHECK_DATA_CORRUPTION(!is_slab_meta(slab_head), slab_head,
+		"compound slab head out of meta range: %p", slab_head))
+		return NULL;
+
+	return slab_head;
+}
+
+static inline void *slab_to_virt(const struct slab *s)
+{
+	unsigned long slab_idx;
+	bool unaligned_slab =
+		((unsigned long)s - SLAB_BASE_ADDR) % sizeof(*s) != 0;
+
+	if (CHECK_DATA_CORRUPTION(!is_slab_meta(s), (void *)s, "slab not in meta range") ||
+	    CHECK_DATA_CORRUPTION(unaligned_slab, (void *)s, "unaligned slab pointer") ||
+	    CHECK_DATA_CORRUPTION(s->compound_slab_head != s, (void *)s,
+			"%s called on non-head slab", __func__))
+		return NULL;
+
+	slab_idx = ((unsigned long)s - SLAB_BASE_ADDR) / sizeof(*s);
+	return (void *)(SLAB_DATA_BASE_ADDR + PAGE_SIZE * slab_idx);
+}
+#else
 static inline struct slab *virt_to_slab(const void *addr)
 {
 	return page_slab(virt_to_page(addr));
 }
+#endif /* CONFIG_SLAB_VIRTUAL */
 
 static inline int slab_order(const struct slab *slab)
 {
