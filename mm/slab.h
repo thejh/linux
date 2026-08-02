@@ -95,6 +95,28 @@ struct freelist_counters {
 	};
 };
 
+/*
+ * Word size structure that can be atomically updated or read and that
+ * contains both the order and the number of objects that a slab of the
+ * given order would contain.
+ */
+struct kmem_cache_order_objects {
+	unsigned int x;
+};
+
+#define OO_SHIFT	16
+#define OO_MASK		((1 << OO_SHIFT) - 1)
+
+static inline unsigned int oo_order(struct kmem_cache_order_objects x)
+{
+	return x.x >> OO_SHIFT;
+}
+
+static inline unsigned int oo_objects(struct kmem_cache_order_objects x)
+{
+	return x.x & OO_MASK;
+}
+
 /* Reuses the bits in struct page */
 struct slab {
 	memdesc_flags_t flags;
@@ -212,15 +234,6 @@ static inline size_t slab_size(const struct slab *slab)
 {
 	return PAGE_SIZE << slab_order(slab);
 }
-
-/*
- * Word size structure that can be atomically updated or read and that
- * contains both the order and the number of objects that a slab of the
- * given order would contain.
- */
-struct kmem_cache_order_objects {
-	unsigned int x;
-};
 
 struct kmem_cache_per_node_ptrs {
 	struct node_barn *barn;
