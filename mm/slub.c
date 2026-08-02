@@ -2477,11 +2477,12 @@ bool memcg_slab_post_charge(void *p, gfp_t flags)
 	struct slab *slab;
 	unsigned long off;
 
-	page = virt_to_page(p);
-	if (PageLargeKmalloc(page)) {
+	slab = virt_to_slab(p);
+	if (!slab) {
 		unsigned int order;
 		int size;
 
+		page = virt_to_page(p);
 		if (PageMemcgKmem(page))
 			return true;
 
@@ -2500,7 +2501,6 @@ bool memcg_slab_post_charge(void *p, gfp_t flags)
 		return true;
 	}
 
-	slab = page_slab(page);
 	s = slab->slab_cache;
 
 	/*
@@ -4774,7 +4774,7 @@ void *alloc_from_pcs(struct kmem_cache *s, gfp_t gfp, unsigned int alloc_flags, 
 		 * be false because of cpu migration during an unlocked part of
 		 * the current allocation or previous freeing process.
 		 */
-		if (page_to_nid(virt_to_page(object)) != node) {
+		if (slab_nid(virt_to_slab(object)) != node) {
 			local_unlock(&s->cpu_sheaves->lock);
 			stat(s, ALLOC_NODE_MISMATCH);
 			return NULL;
@@ -6630,9 +6630,9 @@ void kvfree_rcu_cb(struct rcu_head *head)
 		return;
 	}
 
-	page = virt_to_page(obj);
-	slab = page_slab(page);
+	slab = virt_to_slab(obj);
 	if (!slab) {
+		page = virt_to_page(obj);
 		/*
 		 * rcu_head offset can be only less than page size so no need to
 		 * consider allocation order
@@ -6774,10 +6774,10 @@ __do_krealloc(const void *p, size_t new_size, unsigned long align, gfp_t flags, 
 	if (is_kfence_address(p)) {
 		ks = orig_size = kfence_ksize(p);
 	} else {
-		struct page *page = virt_to_page(p);
-		struct slab *slab = page_slab(page);
+		struct slab *slab = virt_to_slab(p);
 
 		if (!slab) {
+			struct page *page = virt_to_page(p);
 			/* Big kmalloc object */
 			ks = page_size(page);
 			WARN_ON(ks <= KMALLOC_MAX_CACHE_SIZE);
@@ -6796,7 +6796,7 @@ __do_krealloc(const void *p, size_t new_size, unsigned long align, gfp_t flags, 
 	 * allocation on the requested node will be attempted.
 	 */
 	if (unlikely(flags & __GFP_THISNODE) && nid != NUMA_NO_NODE &&
-		     nid != page_to_nid(virt_to_page(p)))
+		     nid != (s ? slab_nid(virt_to_slab(p)) : page_to_nid(virt_to_page(p))))
 		goto alloc_new;
 
 	/* If the old object doesn't fit, allocate a bigger one */
@@ -7044,19 +7044,19 @@ int build_detached_freelist(struct kmem_cache *s, size_t size,
 	size_t same;
 
 	object = p[--size];
-	page = virt_to_page(object);
-	slab = page_slab(page);
 	if (!s) {
 		/* Handle kalloc'ed objects */
-		if (!slab) {
+		if (unlikely(!is_slab_addr(object))) {
+			page = virt_to_page(object);
 			free_large_kmalloc(page, object);
 			df->slab = NULL;
 			return size;
 		}
-		/* Derive kmem_cache from object */
+		slab = virt_to_slab(object);
 		df->slab = slab;
 		df->s = slab->slab_cache;
 	} else {
+		slab = virt_to_slab(object);
 		df->slab = slab;
 		df->s = s;
 	}
