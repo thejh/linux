@@ -28,4 +28,8 @@ extern unsigned long tlb_single_page_flush_ceiling;
 void __init x86_numa_init(void);
 #endif
 
+#ifdef CONFIG_SLAB_VIRTUAL
+extern unsigned long slub_addr_base;
+#endif
+
 #endif	/* __X86_MM_INTERNAL_H */
