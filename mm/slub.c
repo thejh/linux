@@ -916,7 +916,7 @@ static inline unsigned int obj_exts_offset_in_object(struct kmem_cache *s)
  */
 static inline bool validate_slab_ptr(struct slab *slab)
 {
-	return PageSlab(slab_page(slab));
+	return is_slab_page(slab);
 }
 
 static unsigned long object_map[BITS_TO_LONGS(MAX_OBJS_PER_PAGE)];
@@ -1780,7 +1780,10 @@ static inline int free_consistency_checks(struct kmem_cache *s,
 		return 0;
 
 	if (unlikely(s != slab->slab_cache)) {
-		if (!slab->slab_cache) {
+		if (!is_slab_page(slab)) {
+			slab_err(s, slab, "Attempt to free object(0x%p) outside of slab",
+				 object);
+		} else if (!slab->slab_cache) {
 			slab_err(NULL, slab, "No slab cache for object 0x%p",
 				 object);
 		} else {
@@ -6542,15 +6545,19 @@ static size_t __ksize(const void *object)
 	if (unlikely(object == ZERO_SIZE_PTR))
 		return 0;
 
-	page = virt_to_page(object);
-
-	if (unlikely(PageLargeKmalloc(page)))
+	if (unlikely(!is_slab_addr(object))) {
+		page = virt_to_page(object);
+		if (WARN_ON(page_size(page) <= KMALLOC_MAX_CACHE_SIZE))
+			return 0;
+		if (WARN_ON(object != page_address(page)))
+			return 0;
 		return large_kmalloc_size(page);
+	}
 
-	slab = page_slab(page);
+	slab = virt_to_slab(object);
 	/* Delete this after we're sure there are no users */
 	if (WARN_ON(!slab))
-		return page_size(page);
+		return 0;
 
 #ifdef CONFIG_SLUB_DEBUG
 	skip_orig_size_check(slab->slab_cache, object);
@@ -6680,14 +6687,14 @@ void kfree(const void *object)
 	if (unlikely(ZERO_OR_NULL_PTR(object)))
 		return;
 
-	page = virt_to_page(object);
-	slab = page_slab(page);
-	if (!slab) {
+	if (unlikely(!is_slab_addr(object))) {
+		page = virt_to_page(object);
 		/* kmalloc_nolock() doesn't support large kmalloc */
 		free_large_kmalloc(page, (void *)object);
 		return;
 	}
 
+	slab = virt_to_slab(object);
 	s = slab->slab_cache;
 	slab_free(s, slab, x, _RET_IP_);
 }
