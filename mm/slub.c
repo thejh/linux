@@ -526,7 +526,8 @@ static inline freeptr_t freelist_ptr_encode(const struct kmem_cache *s,
 }
 
 static inline void *freelist_ptr_decode(const struct kmem_cache *s,
-					freeptr_t ptr, unsigned long ptr_addr)
+					freeptr_t ptr, unsigned long ptr_addr,
+					struct slab *slab)
 {
 	void *decoded;
 
@@ -538,7 +539,8 @@ static inline void *freelist_ptr_decode(const struct kmem_cache *s,
 	return decoded;
 }
 
-static inline void *get_freepointer(struct kmem_cache *s, void *object)
+static inline void *get_freepointer(struct kmem_cache *s, void *object,
+				    struct slab *slab)
 {
 	unsigned long ptr_addr;
 	freeptr_t p;
@@ -546,7 +548,7 @@ static inline void *get_freepointer(struct kmem_cache *s, void *object)
 	object = kasan_reset_tag(object);
 	ptr_addr = (unsigned long)object + s->offset;
 	p = *(freeptr_t *)(ptr_addr);
-	return freelist_ptr_decode(s, p, ptr_addr);
+	return freelist_ptr_decode(s, p, ptr_addr, slab);
 }
 
 static inline void set_freepointer(struct kmem_cache *s, void *object, void *fp)
@@ -918,7 +920,7 @@ static void __fill_map(unsigned long *obj_map, struct kmem_cache *s,
 
 	bitmap_zero(obj_map, slab->objects);
 
-	for (p = slab->freelist; p; p = get_freepointer(s, p))
+	for (p = slab->freelist; p; p = get_freepointer(s, p, slab))
 		set_bit(__obj_to_index(s, addr, p), obj_map);
 }
 
@@ -1170,7 +1172,7 @@ static void print_trailer(struct kmem_cache *s, struct slab *slab, u8 *p)
 	print_slab_info(slab);
 
 	pr_err("Object 0x%p @offset=%tu fp=0x%p\n\n",
-	       p, p - addr, get_freepointer(s, p));
+	       p, p - addr, get_freepointer(s, p, slab));
 
 	if (s->flags & SLAB_RED_ZONE)
 		print_section(KERN_ERR, "Redzone  ", p - s->red_left_pad,
@@ -1521,7 +1523,7 @@ static int check_object(struct kmem_cache *s, struct slab *slab,
 	 * object and freepointer overlap.
 	 */
 	if ((freeptr_outside_object(s) || val != SLUB_RED_ACTIVE) &&
-	    !check_valid_pointer(s, slab, get_freepointer(s, p))) {
+	    !check_valid_pointer(s, slab, get_freepointer(s, p, slab))) {
 		object_err(s, slab, p, "Freepointer corrupt");
 		/*
 		 * No choice but to zap it and thus lose the remainder
@@ -1595,7 +1597,7 @@ static bool on_freelist(struct kmem_cache *s, struct slab *slab, void *search)
 			}
 		}
 		object = fp;
-		fp = get_freepointer(s, object);
+		fp = get_freepointer(s, object, slab);
 		nr++;
 	}
 
@@ -2691,7 +2693,7 @@ bool slab_free_freelist_hook(struct kmem_cache *s, void **head, void **tail,
 
 	do {
 		object = next;
-		next = get_freepointer(s, object);
+		next = get_freepointer(s, object, NULL);
 
 		/* If object's reuse doesn't have to be delayed */
 		if (likely(slab_free_hook(s, object, init, false))) {
@@ -3569,7 +3571,7 @@ static void *alloc_single_from_partial(struct kmem_cache *s,
 #endif
 
 	object = slab->freelist;
-	slab->freelist = get_freepointer(s, object);
+	slab->freelist = get_freepointer(s, object, slab);
 	slab->inuse++;
 
 	if (!alloc_debug_processing(s, slab, object, orig_size)) {
@@ -3849,7 +3851,7 @@ static void *get_from_partial_node(struct kmem_cache *s,
 			old.freelist = slab->freelist;
 			old.counters = slab->counters;
 
-			new.freelist = get_freepointer(s, old.freelist);
+			new.freelist = get_freepointer(s, old.freelist, slab);
 			new.counters = old.counters;
 			new.inuse++;
 
@@ -4211,7 +4213,7 @@ next_object:
 
 	/* Reached end of constructed freelist yet? */
 	if (object != tail) {
-		object = get_freepointer(s, object);
+		object = get_freepointer(s, object, slab);
 		goto next_object;
 	}
 	checks_ok = true;
@@ -7191,7 +7193,7 @@ __refill_objects_node(struct kmem_cache *s, void **p, gfp_t gfp, unsigned int mi
 
 		while (count && refilled < max) {
 			p[refilled] = object;
-			object = get_freepointer(s, object);
+			object = get_freepointer(s, object, slab);
 			maybe_wipe_obj_freeptr(s, p[refilled]);
 
 			refilled++;
@@ -7215,7 +7217,7 @@ __refill_objects_node(struct kmem_cache *s, void **p, gfp_t gfp, unsigned int mi
 
 			do {
 				tail = object;
-				object = get_freepointer(s, object);
+				object = get_freepointer(s, object, slab);
 			} while (object);
 			__slab_free(s, slab, head, tail, count, _RET_IP_);
 		}
