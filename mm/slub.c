@@ -300,8 +300,6 @@ void *fixup_red_left(struct kmem_cache *s, void *p)
  */
 #define DEBUG_METADATA_FLAGS (SLAB_RED_ZONE | SLAB_POISON | SLAB_STORE_USER)
 
-#define OO_SHIFT	16
-#define OO_MASK		((1 << OO_SHIFT) - 1)
 #define MAX_OBJS_PER_PAGE	32767 /* since slab.objects is u15 */
 
 /* Internal SLUB flags */
@@ -602,16 +600,6 @@ static inline struct kmem_cache_order_objects oo_make(unsigned int order,
 	};
 
 	return x;
-}
-
-static inline unsigned int oo_order(struct kmem_cache_order_objects x)
-{
-	return x.x >> OO_SHIFT;
-}
-
-static inline unsigned int oo_objects(struct kmem_cache_order_objects x)
-{
-	return x.x & OO_MASK;
 }
 
 /*
