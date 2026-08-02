@@ -1476,4 +1476,5 @@ size_t kmalloc_size_roundup(size_t size);
 void __init kmem_cache_init_late(void);
 void __init kvfree_rcu_init(void);
 
+#define is_slab_addr(addr) folio_test_slab(virt_to_folio(addr))
 #endif	/* _LINUX_SLAB_H */
