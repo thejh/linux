@@ -3260,9 +3260,10 @@ static inline void page_clear_slab(struct page *page, struct slab *slab)
 	__ClearPageSlab(page);
 }
 
-static inline struct slab *alloc_slab_page(gfp_t flags, int node,
-					   struct kmem_cache_order_objects oo,
-					   bool allow_spin)
+static inline struct slab *alloc_slab_page(struct kmem_cache *s,
+		gfp_t meta_flags, gfp_t flags, int node,
+		struct kmem_cache_order_objects oo,
+		bool allow_spin)
 {
 	struct page *page;
 	struct slab *slab;
@@ -3386,7 +3387,7 @@ static struct slab *allocate_slab(struct kmem_cache *s, gfp_t flags,
 	if ((alloc_gfp & __GFP_DIRECT_RECLAIM) && oo_order(oo) > oo_order(s->min))
 		alloc_gfp = (alloc_gfp | __GFP_NOMEMALLOC) & ~__GFP_RECLAIM;
 
-	slab = alloc_slab_page(alloc_gfp, node, oo, allow_spin);
+	slab = alloc_slab_page(s, flags, alloc_gfp, node, oo, allow_spin);
 	if (unlikely(!slab)) {
 		oo = s->min;
 		alloc_gfp = flags;
@@ -3394,7 +3395,7 @@ static struct slab *allocate_slab(struct kmem_cache *s, gfp_t flags,
 		 * Allocation may have failed due to fragmentation.
 		 * Try a lower order alloc if possible
 		 */
-		slab = alloc_slab_page(alloc_gfp, node, oo, allow_spin);
+		slab = alloc_slab_page(s, flags, alloc_gfp, node, oo, allow_spin);
 		if (unlikely(!slab))
 			return NULL;
 		stat(s, ORDER_FALLBACK);
