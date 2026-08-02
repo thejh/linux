@@ -365,4 +365,12 @@ config SLAB_VIRTUAL
 	  virtual memory used as a slab cache is never reused to store
 	  objects from other slab caches or non-slab data.
 
+config KMALLOC_SPLIT_VARSIZE
+	bool "Split kmalloc caches for fixed-size and variable-size allocations"
+	default y
+	depends on !SLUB_TINY
+	help
+	  Separate kmalloc caches for allocations whose size is a compile-time
+	  constant from those where the size is variable.
+
 endmenu
