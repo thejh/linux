@@ -3,6 +3,7 @@
 #define _ASM_X86_PAGE_64_H
 
 #include <asm/page_64_types.h>
+#include <asm/pgtable_types.h>
 
 #ifndef __ASSEMBLER__
 #include <asm/cpufeatures.h>
@@ -20,9 +21,18 @@ extern unsigned long vmalloc_base;
 extern unsigned long vmemmap_base;
 extern unsigned long direct_map_physmem_end;
 
+#ifdef CONFIG_SLAB_VIRTUAL
+unsigned long slab_virt_to_phys(unsigned long x);
+#endif
+
 static __always_inline unsigned long __phys_addr_nodebug(unsigned long x)
 {
 	unsigned long y = x - __START_KERNEL_map;
+
+#ifdef CONFIG_SLAB_VIRTUAL
+	if (is_slab_addr(x))
+		return slab_virt_to_phys(x);
+#endif
 
 	/* use the carry flag to determine if x was < __START_KERNEL_map */
 	x = y + ((x > y) ? phys_base : (__START_KERNEL_map - PAGE_OFFSET));
