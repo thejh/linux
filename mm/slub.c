@@ -179,6 +179,10 @@
  * 			the fast path and disables lockless freelists.
  */
 
+#ifdef CONFIG_SLAB_VIRTUAL
+unsigned long slub_addr_base = SLAB_DATA_BASE_ADDR;
+#endif /* CONFIG_SLAB_VIRTUAL */
+
 /**
  * enum slab_flags - How the slab flags bits are used.
  * @SL_locked: Is locked with slab_lock()
