@@ -1476,5 +1476,10 @@ size_t kmalloc_size_roundup(size_t size);
 void __init kmem_cache_init_late(void);
 void __init kvfree_rcu_init(void);
 
+#ifdef CONFIG_SLAB_VIRTUAL
+void __init init_slub_page_reclaim(void);
+#else
 #define is_slab_addr(addr) folio_test_slab(virt_to_folio(addr))
+static inline void init_slub_page_reclaim(void) {}
+#endif /* CONFIG_SLAB_VIRTUAL */
 #endif	/* _LINUX_SLAB_H */
