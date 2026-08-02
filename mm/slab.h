@@ -539,7 +539,7 @@ kmalloc_slab(size_t size, kmem_buckets *b, gfp_t flags, kmalloc_token_t token,
 		type = KMALLOC_NO_OBJ_EXT;
 
 	if (!b)
-		b = &kmalloc_caches[type];
+		b = &kmalloc_caches[type + KMALLOC_VARSIZE_OFFSET];
 	if (size <= 192)
 		index = kmalloc_size_index[size_index_elem(size)];
 	else

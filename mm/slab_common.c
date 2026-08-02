@@ -808,60 +808,74 @@ size_t kmalloc_size_roundup(size_t size)
 EXPORT_SYMBOL(kmalloc_size_roundup);
 
 #ifdef CONFIG_ZONE_DMA
-#define KMALLOC_DMA_NAME(sz)	.name[KMALLOC_DMA] = "dma-kmalloc-" #sz,
+#define KMALLOC_DMA_NAME(prefix, off, sz)	.name[off + KMALLOC_DMA] = prefix "dma-kmalloc-" #sz,
 #else
-#define KMALLOC_DMA_NAME(sz)
+#define KMALLOC_DMA_NAME(prefix, off, sz)
 #endif
 
 #ifdef CONFIG_KMALLOC_PARTITION_CACHES
 #define __KMALLOC_PARTITION_CONCAT(a, b) a ## b
-#define KMALLOC_PARTITION_NAME(N, sz, base, type) __KMALLOC_PARTITION_CONCAT(KMA_PART_, N)(sz, base, type)
-#define KMA_PART_1(sz, base, type)                        .name[base +  1] = "kmalloc-" type "01-" #sz,
-#define KMA_PART_2(sz, base, type)  KMA_PART_1(sz, base, type)  .name[base +  2] = "kmalloc-" type "02-" #sz,
-#define KMA_PART_3(sz, base, type)  KMA_PART_2(sz, base, type)  .name[base +  3] = "kmalloc-" type "03-" #sz,
-#define KMA_PART_4(sz, base, type)  KMA_PART_3(sz, base, type)  .name[base +  4] = "kmalloc-" type "04-" #sz,
-#define KMA_PART_5(sz, base, type)  KMA_PART_4(sz, base, type)  .name[base +  5] = "kmalloc-" type "05-" #sz,
-#define KMA_PART_6(sz, base, type)  KMA_PART_5(sz, base, type)  .name[base +  6] = "kmalloc-" type "06-" #sz,
-#define KMA_PART_7(sz, base, type)  KMA_PART_6(sz, base, type)  .name[base +  7] = "kmalloc-" type "07-" #sz,
-#define KMA_PART_8(sz, base, type)  KMA_PART_7(sz, base, type)  .name[base +  8] = "kmalloc-" type "08-" #sz,
-#define KMA_PART_9(sz, base, type)  KMA_PART_8(sz, base, type)  .name[base +  9] = "kmalloc-" type "09-" #sz,
-#define KMA_PART_10(sz, base, type) KMA_PART_9(sz, base, type)  .name[base + 10] = "kmalloc-" type "10-" #sz,
-#define KMA_PART_11(sz, base, type) KMA_PART_10(sz, base, type) .name[base + 11] = "kmalloc-" type "11-" #sz,
-#define KMA_PART_12(sz, base, type) KMA_PART_11(sz, base, type) .name[base + 12] = "kmalloc-" type "12-" #sz,
-#define KMA_PART_13(sz, base, type) KMA_PART_12(sz, base, type) .name[base + 13] = "kmalloc-" type "13-" #sz,
-#define KMA_PART_14(sz, base, type) KMA_PART_13(sz, base, type) .name[base + 14] = "kmalloc-" type "14-" #sz,
-#define KMA_PART_15(sz, base, type) KMA_PART_14(sz, base, type) .name[base + 15] = "kmalloc-" type "15-" #sz,
+#define KMALLOC_PARTITION_NAME(prefix, N, sz, base, off, type) __KMALLOC_PARTITION_CONCAT(KMA_PART_, N)(prefix, sz, base, off, type)
+#define KMA_PART_1(prefix, sz, base, off, type)                        .name[base + off +  1] = prefix "kmalloc-" type "01-" #sz,
+#define KMA_PART_2(prefix, sz, base, off, type)  KMA_PART_1(prefix, sz, base, off, type)  .name[base + off +  2] = prefix "kmalloc-" type "02-" #sz,
+#define KMA_PART_3(prefix, sz, base, off, type)  KMA_PART_2(prefix, sz, base, off, type)  .name[base + off +  3] = prefix "kmalloc-" type "03-" #sz,
+#define KMA_PART_4(prefix, sz, base, off, type)  KMA_PART_3(prefix, sz, base, off, type)  .name[base + off +  4] = prefix "kmalloc-" type "04-" #sz,
+#define KMA_PART_5(prefix, sz, base, off, type)  KMA_PART_4(prefix, sz, base, off, type)  .name[base + off +  5] = prefix "kmalloc-" type "05-" #sz,
+#define KMA_PART_6(prefix, sz, base, off, type)  KMA_PART_5(prefix, sz, base, off, type)  .name[base + off +  6] = prefix "kmalloc-" type "06-" #sz,
+#define KMA_PART_7(prefix, sz, base, off, type)  KMA_PART_6(prefix, sz, base, off, type)  .name[base + off +  7] = prefix "kmalloc-" type "07-" #sz,
+#define KMA_PART_8(prefix, sz, base, off, type)  KMA_PART_7(prefix, sz, base, off, type)  .name[base + off +  8] = prefix "kmalloc-" type "08-" #sz,
+#define KMA_PART_9(prefix, sz, base, off, type)  KMA_PART_8(prefix, sz, base, off, type)  .name[base + off +  9] = prefix "kmalloc-" type "09-" #sz,
+#define KMA_PART_10(prefix, sz, base, off, type) KMA_PART_9(prefix, sz, base, off, type)  .name[base + off + 10] = prefix "kmalloc-" type "10-" #sz,
+#define KMA_PART_11(prefix, sz, base, off, type) KMA_PART_10(prefix, sz, base, off, type) .name[base + off + 11] = prefix "kmalloc-" type "11-" #sz,
+#define KMA_PART_12(prefix, sz, base, off, type) KMA_PART_11(prefix, sz, base, off, type) .name[base + off + 12] = prefix "kmalloc-" type "12-" #sz,
+#define KMA_PART_13(prefix, sz, base, off, type) KMA_PART_12(prefix, sz, base, off, type) .name[base + off + 13] = prefix "kmalloc-" type "13-" #sz,
+#define KMA_PART_14(prefix, sz, base, off, type) KMA_PART_13(prefix, sz, base, off, type) .name[base + off + 14] = prefix "kmalloc-" type "14-" #sz,
+#define KMA_PART_15(prefix, sz, base, off, type) KMA_PART_14(prefix, sz, base, off, type) .name[base + off + 15] = prefix "kmalloc-" type "15-" #sz,
 #else // CONFIG_KMALLOC_PARTITION_CACHES
-#define KMALLOC_PARTITION_NAME(N, sz, base, type)
+#define KMALLOC_PARTITION_NAME(prefix, N, sz, base, off, type)
 #endif
 
 #ifdef CONFIG_MEMCG
-#define KMALLOC_CGROUP_NAME(sz)	.name[KMALLOC_CGROUP] = "kmalloc-cg-" #sz, \
-	KMALLOC_PARTITION_NAME(KMALLOC_PARTITION_CACHES_NR, sz, KMALLOC_CGROUP_PARTITION_START, "cg-part-")
+#define KMALLOC_CGROUP_NAME(prefix, off, sz)	.name[off + KMALLOC_CGROUP] = prefix "kmalloc-cg-" #sz, \
+	KMALLOC_PARTITION_NAME(prefix, KMALLOC_PARTITION_CACHES_NR, sz, KMALLOC_CGROUP_PARTITION_START, off, "cg-part-")
 #else
-#define KMALLOC_CGROUP_NAME(sz)
+#define KMALLOC_CGROUP_NAME(prefix, off, sz)
 #endif
 
 #ifndef CONFIG_SLUB_TINY
-#define KMALLOC_RCL_NAME(sz)	.name[KMALLOC_RECLAIM] = "kmalloc-rcl-" #sz,
+#define KMALLOC_RCL_NAME(prefix, off, sz)	.name[off + KMALLOC_RECLAIM] = prefix "kmalloc-rcl-" #sz,
 #else
-#define KMALLOC_RCL_NAME(sz)
+#define KMALLOC_RCL_NAME(prefix, off, sz)
 #endif
 
 #ifdef CONFIG_SLAB_OBJ_EXT
-#define KMALLOC_NO_OBJ_EXT_NAME(sz) .name[KMALLOC_NO_OBJ_EXT] = "kmalloc-no-objext-" #sz,
+#define KMALLOC_NO_OBJ_EXT_NAME(prefix, off, sz) .name[off + KMALLOC_NO_OBJ_EXT] = prefix "kmalloc-no-objext-" #sz,
 #else
-#define KMALLOC_NO_OBJ_EXT_NAME(sz)
+#define KMALLOC_NO_OBJ_EXT_NAME(prefix, off, sz)
+#endif
+
+#define KMALLOC_NORMAL_NAME(prefix, off, sz) \
+	.name[off + KMALLOC_NORMAL]  = prefix "kmalloc-" #sz, \
+	KMALLOC_PARTITION_NAME(prefix, KMALLOC_PARTITION_CACHES_NR, sz, KMALLOC_PARTITION_START, off, "part-")
+
+#define KMALLOC_ALL_NAMES(prefix, off, sz)	\
+	KMALLOC_NORMAL_NAME(prefix, off, sz)	\
+	KMALLOC_RCL_NAME(prefix, off, sz)	\
+	KMALLOC_CGROUP_NAME(prefix, off, sz)	\
+	KMALLOC_DMA_NAME(prefix, off, sz)	\
+	KMALLOC_NO_OBJ_EXT_NAME(prefix, off, sz)
+
+#ifdef CONFIG_KMALLOC_SPLIT_VARSIZE
+#define KMALLOC_VARSIZE_NAMES(sz) \
+	KMALLOC_ALL_NAMES("dyn-", KMALLOC_VARSIZE_OFFSET, sz)
+#else
+#define KMALLOC_VARSIZE_NAMES(sz)
 #endif
 
 #define INIT_KMALLOC_INFO(__size, __short_size)			\
 {								\
-	.name[KMALLOC_NORMAL]  = "kmalloc-" #__short_size,	\
-	KMALLOC_RCL_NAME(__short_size)				\
-	KMALLOC_CGROUP_NAME(__short_size)			\
-	KMALLOC_DMA_NAME(__short_size)				\
-	KMALLOC_PARTITION_NAME(KMALLOC_PARTITION_CACHES_NR, __short_size, KMALLOC_PARTITION_START, "part-")	\
-	KMALLOC_NO_OBJ_EXT_NAME(__short_size)			\
+	KMALLOC_ALL_NAMES("", 0, __short_size)			\
+	KMALLOC_VARSIZE_NAMES(__short_size)			\
 	.size = __size,						\
 }
 
@@ -968,12 +982,18 @@ new_kmalloc_cache(int idx, enum kmalloc_cache_type type)
 		if (mem_cgroup_kmem_disabled()) {
 			int offset = type - KMALLOC_CGROUP_PARTITION_START;
 			kmalloc_caches[type][idx] = kmalloc_caches[KMALLOC_NORMAL + offset][idx];
+			if (IS_ENABLED(CONFIG_KMALLOC_SPLIT_VARSIZE))
+				kmalloc_caches[type + KMALLOC_VARSIZE_OFFSET][idx] =
+					kmalloc_caches[KMALLOC_NORMAL + offset + KMALLOC_VARSIZE_OFFSET][idx];
 			return;
 		}
 		flags |= SLAB_ACCOUNT;
 	} else if (IS_ENABLED(CONFIG_SLAB_OBJ_EXT) && type == KMALLOC_NO_OBJ_EXT) {
 		if (!need_kmalloc_no_objext()) {
 			kmalloc_caches[type][idx] = kmalloc_caches[KMALLOC_NORMAL][idx];
+			if (IS_ENABLED(CONFIG_KMALLOC_SPLIT_VARSIZE))
+				kmalloc_caches[type + KMALLOC_VARSIZE_OFFSET][idx] =
+					kmalloc_caches[KMALLOC_NORMAL + KMALLOC_VARSIZE_OFFSET][idx];
 			return;
 		}
 		flags |= SLAB_NO_OBJ_EXT | SLAB_NO_MERGE;
@@ -1003,8 +1023,19 @@ new_kmalloc_cache(int idx, enum kmalloc_cache_type type)
 		kmalloc_caches[type][aligned_idx] = create_kmalloc_cache(
 					kmalloc_info[aligned_idx].name[type],
 					aligned_size, flags);
-	if (idx != aligned_idx)
+
+	if (IS_ENABLED(CONFIG_KMALLOC_SPLIT_VARSIZE))
+		kmalloc_caches[type + KMALLOC_VARSIZE_OFFSET][aligned_idx] =
+			create_kmalloc_cache(
+				kmalloc_info[aligned_idx].name[type + KMALLOC_VARSIZE_OFFSET],
+				aligned_size, flags);
+
+	if (idx != aligned_idx) {
 		kmalloc_caches[type][idx] = kmalloc_caches[type][aligned_idx];
+		if (IS_ENABLED(CONFIG_KMALLOC_SPLIT_VARSIZE))
+			kmalloc_caches[type + KMALLOC_VARSIZE_OFFSET][idx] =
+				kmalloc_caches[type + KMALLOC_VARSIZE_OFFSET][aligned_idx];
+	}
 }
 
 /*
@@ -1020,7 +1051,7 @@ void __init create_kmalloc_caches(void)
 	/*
 	 * Including KMALLOC_CGROUP if CONFIG_MEMCG defined
 	 */
-	for (type = KMALLOC_NORMAL; type < NR_KMALLOC_TYPES; type++) {
+	for (type = KMALLOC_NORMAL; type < NR_KMALLOC_TYPES_BASE; type++) {
 		/* Caches that are NOT of the two-to-the-power-of size. */
 		if (KMALLOC_MIN_SIZE <= 32)
 			new_kmalloc_cache(1, type);
