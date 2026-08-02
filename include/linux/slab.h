@@ -738,8 +738,20 @@ enum kmalloc_cache_type {
 #ifdef CONFIG_SLAB_OBJ_EXT
 	KMALLOC_NO_OBJ_EXT,
 #endif
-	NR_KMALLOC_TYPES
+	NR_KMALLOC_TYPES_BASE,
 };
+
+#ifdef CONFIG_KMALLOC_SPLIT_VARSIZE
+/*
+ * Each type exists twice:
+ * Once for fixed-size allocations, once for variably-size allocations
+ */
+#define NR_KMALLOC_TYPES (2 * NR_KMALLOC_TYPES_BASE)
+#define KMALLOC_VARSIZE_OFFSET NR_KMALLOC_TYPES_BASE
+#else
+#define NR_KMALLOC_TYPES NR_KMALLOC_TYPES_BASE
+#define KMALLOC_VARSIZE_OFFSET 0
+#endif
 
 typedef struct kmem_cache * kmem_buckets[KMALLOC_SHIFT_HIGH + 1];
 
