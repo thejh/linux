@@ -3240,6 +3240,26 @@ static void barn_shrink(struct kmem_cache *s, struct node_barn *barn)
 /*
  * Slab allocation and freeing
  */
+
+static inline void page_set_slab(struct page *page, struct slab *slab)
+{
+	__SetPageSlab(page);
+	/* Make the flag visible before any changes to page->mapping */
+	smp_wmb();
+
+	if (page_is_pfmemalloc(page))
+		slab_set_pfmemalloc(slab);
+}
+
+static inline void page_clear_slab(struct page *page, struct slab *slab)
+{
+	__slab_clear_pfmemalloc(slab);
+	page->mapping = NULL;
+	/* Make the mapping reset visible before clearing the flag */
+	smp_wmb();
+	__ClearPageSlab(page);
+}
+
 static inline struct slab *alloc_slab_page(gfp_t flags, int node,
 					   struct kmem_cache_order_objects oo,
 					   bool allow_spin)
@@ -3259,10 +3279,8 @@ static inline struct slab *alloc_slab_page(gfp_t flags, int node,
 	if (!page)
 		return NULL;
 
-	__SetPageSlab(page);
-	slab = page_slab(page);
-	if (page_is_pfmemalloc(page))
-		slab_set_pfmemalloc(slab);
+	slab = (struct slab *)page;
+	page_set_slab(page, slab);
 
 	return slab;
 }
@@ -3423,9 +3441,7 @@ static void __free_slab(struct kmem_cache *s, struct slab *slab, bool allow_spin
 	int order = compound_order(page);
 	int pages = 1 << order;
 
-	__slab_clear_pfmemalloc(slab);
-	page->mapping = NULL;
-	__ClearPageSlab(page);
+	page_clear_slab(page, slab);
 	mm_account_reclaimed_pages(pages);
 	unaccount_slab(slab, order, s, allow_spin);
 	if (allow_spin)
