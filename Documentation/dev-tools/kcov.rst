@@ -383,3 +383,73 @@ local tasks spawned by the process and the global task that handles USB bus #1:
 		perror("close"), exit(1);
 	return 0;
     }
+
+Extended trace format
+---------------------
+
+If the kernel is built with ``CONFIG_KCOV_EXT_RECORDS=y`` (which requires LLVM
+>=23.1.0), the ``KCOV_TRACE_PC_EXT`` mode can be used instead of
+``KCOV_TRACE_PC``.
+
+``KCOV_TRACE_PC_EXT`` uses the top byte of recorded PCs to store a record type.
+The function entry block is recorded with type ``KCOV_RECORDFLAG_TYPE_ENTRY``,
+and an additional record with ``KCOV_RECORDFLAG_TYPE_EXIT`` is generated on
+function exit.
+
+``KCOV_RECORDFLAG_TYPE_ENTRY`` records are immediately followed by the PC from
+which the call occurred.
+
+After code sections which have to temporarily stop emitting KCOV trace events,
+a ``KCOV_RECORDFLAG_TYPE_EESUM`` record summarizes the entry/exit events that
+happened.
+
+Together, these record types allow keeping track of the current stack trace.
+
+Memory access tracing
+---------------------
+
+If the kernel is built with ``CONFIG_KCOV_MEMORY=y`` (which depends on
+``CONFIG_KCOV_EXT_RECORDS=y``), the ``KCOV_TRACE_MEMORY_ACCESS`` mode can be
+used to produce a trace similar to ``KCOV_TRACE_PC_EXT``, but with additional
+``KCOV_RECORDFLAG_TYPE_MEMORY`` records that are emitted for every memory
+access.
+
+In such a trace, when a record with type ``KCOV_RECORDFLAG_TYPE_MEMORY`` is
+encountered, the trace element is a ``struct memory_access_record`` with a
+size returned by the ioctl ``KCOV_GET_MEMORY_RECORD_SIZE``.
+
+Delay injection
+---------------
+
+If the kernel is built with ``CONFIG_KCOV_MEMORY=y``, userspace can configure
+soft ordering constraints (like "this load on thread A should happen before that
+write happens on thread B") through the ioctl ``KCOV_SET_DI``, with an argument
+pointing to a ``struct kcov_set_di_arg``.
+The kernel will attempt to fulfill these ordering constraints by spin-waiting,
+with a configurable timeout ``spin_limit`` after which the kernel gives up on
+forcing the specified ordering.
+
+For each thread, userspace supplies an array of ``struct kcov_di_stack``
+elements, each of which describes an action to take at a specific call stack
+ending at an instrumented memory access.
+An action is one of:
+
+ - ``DI_STACK_WAKE_PRE``: "set synchronization bit N before this memory access"
+ - ``DI_STACK_WAKE_POST``: "set synchronization bit N after this memory access"
+ - ``DI_STACK_WAIT``: "spin-wait for synchronization bit N"
+
+These are normally paired between two threads: One thread sets synchronization
+bit N after the access at call stack A, another thread spin-waits for
+synchronization bit N before the access at call stack B, and this establishes an
+A-happens-before-B ordering.
+
+Since this involves multiple threads (and therefore multiple KCOV instances),
+the member ``sync_bits_fd`` in ``struct kcov_set_di_arg`` informs the kernel
+which KCOV instance holds the shared synchronization bits (where -1 means the
+current instance).
+
+Userspace can also directly interact with these synchronization bits using:
+
+ - ``KCOV_RESET_DI_FLAGS`` for zeroing all bits
+ - ``KCOV_WAKE_DI_FLAG`` for setting a specific bit
+ - ``KCOV_SPINWAIT_DI_FLAG`` for spin-waiting on a specific bit
